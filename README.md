@@ -99,7 +99,7 @@ Alt+鼠标X1         鼠标侧键
 | [src/Clay.cs](src/Clay.cs) / [src/Theme.cs](src/Theme.cs) | 自绘控件库 / 6 套主题 |
 | [src/Lang.cs](src/Lang.cs) | 中英双语 |
 | [src/build.bat](src/build.bat) | 一键编译脚本 |
-| [CLAUDE.md](CLAUDE.md) | 项目维护手册（架构、数据流、常见坑，写给未来维护者与 AI 协作） |
+| [CLAUDE.md](docs/CLAUDE.md) | 项目维护手册（架构、数据流、常见坑，写给未来维护者与 AI 协作） |
 | [使用说明.txt](使用说明.txt) | 用户手册 |
 
 ## ❓ 常见问题

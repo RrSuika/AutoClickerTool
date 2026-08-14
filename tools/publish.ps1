@@ -1,7 +1,9 @@
 # One-click build + package: read version -> run tests -> build -> zip (version-named) into publish\.
 # ASCII only (so PowerShell reads it correctly regardless of codepage). Chinese filenames are handled via glob.
 $ErrorActionPreference = "Stop"
+# script lives in tools\, so go up one level to reach the repo root
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$root = Split-Path -Parent $root
 Set-Location $root
 
 # 1. Read version from src\VersionInfo.cs
@@ -26,7 +28,7 @@ if (Test-Path $outDir) { Remove-Item $outDir -Recurse -Force }
 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 Copy-Item "AutoClicker.exe" $outDir
 if (Test-Path "README.md") { Copy-Item "README.md" $outDir }
-if (Test-Path "CHANGELOG.md") { Copy-Item "CHANGELOG.md" $outDir }
+if (Test-Path "docs\CHANGELOG.md") { Copy-Item "docs\CHANGELOG.md" -Destination (Join-Path $outDir "CHANGELOG.md") }
 Get-ChildItem -Path $root -Filter "*.txt" | Where-Object { $_.Name -ne "log.txt" } | ForEach-Object { Copy-Item $_.FullName $outDir }
 if (Test-Path "interception.dll") { Copy-Item "interception.dll" $outDir }
 
