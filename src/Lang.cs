@@ -283,6 +283,15 @@ namespace AutoClickerTool
             d["中文"] = "中文";
             d["English"] = "English";
 
+            // 启动与托盘
+            d["Startup"] = "启动";
+            d["Start with Windows"] = "开机自启动";
+            d["Start silently (to tray)"] = "静默启动(最小化到托盘)";
+            d["Show main window"] = "显示主界面";
+            d["Exit"] = "退出";
+            d["Auto-start enabled"] = "已开启开机自启动";
+            d["Auto-start disabled"] = "已关闭开机自启动";
+
             // 按键音效页
             d["Key Sound Effects"] = "按键音效";
             d["Enable key sound effects (new key overrides the playing sound)"] = "启用按键音效(按下新键会打断正在播放的音效)";

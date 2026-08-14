@@ -61,7 +61,9 @@ internal static class Tests
             PlayMinutes = 3,
             PlayUntilTime = "23:59",
             AnimationsEnabled = false,
-            SpamKeyText = "B"
+            SpamKeyText = "B",
+            AutoStart = true,
+            StartMinimized = true
         };
         cfg.SfxBindings["65"] = "a.wav";
         cfg.SfxBindingVolumes["65"] = 80;
@@ -85,8 +87,16 @@ internal static class Tests
             Check(cfg2.SfxBindingVolumes.ContainsKey("65") && cfg2.SfxBindingVolumes["65"] == 80, "SfxBindingVolumes 往返");
             Check(cfg2.SfxComboBindings.ContainsKey("Ctrl+C") && cfg2.SfxComboBindings["Ctrl+C"] == "c.wav", "SfxComboBindings 往返");
             Check(cfg2.LaunchPrograms.Count == 1 && cfg2.LaunchPrograms[0] == "notepad.exe", "LaunchPrograms 往返");
-            Check(cfg2.ConfigVersion == 2, "ConfigVersion 默认值=2");
+            Check(cfg2.AutoStart == true, "AutoStart 往返");
+            Check(cfg2.StartMinimized == true, "StartMinimized 往返");
+            Check(cfg2.ConfigVersion == 3, "ConfigVersion 默认值=3");
         }
+
+        Console.WriteLine("== AppConfig 新默认值 ==");
+        var fresh = new AppConfig();
+        Check(fresh.SfxEnabled == true, "SfxEnabled 默认开启");
+        Check(fresh.AutoStart == false, "AutoStart 默认关闭");
+        Check(fresh.StartMinimized == false, "StartMinimized 默认关闭");
 
         Console.WriteLine();
         Console.WriteLine("===== " + _pass + " 通过, " + _fail + " 失败 =====");

@@ -13,7 +13,7 @@ namespace AutoClickerTool
     internal class AppConfig
     {
         /// <summary>配置结构版本号: 未来改字段时据此做迁移, 避免旧配置静默错乱。</summary>
-        public int ConfigVersion = 2;
+        public int ConfigVersion = 3;
 
         // ---- 功能热键 ----
         public string ClickerHotkey = "F6";
@@ -63,7 +63,7 @@ namespace AutoClickerTool
 
         // ---- 按键音效 ----
         // 注意: JavaScriptSerializer 反序列化要求字典键为字符串, 因此单键绑定用字符串键存键码(JSON 中本就是字符串键, 向后兼容)。
-        public bool SfxEnabled = false;
+        public bool SfxEnabled = true;   // 按键音效默认开启(新安装即生效; 用户可关闭)
         public int SfxVolume = 100;     // 全局音量 0~100(%)
         public Dictionary<string, string> SfxBindings = new Dictionary<string, string>(); // 键码(字符串) → Sounds 文件夹内文件名
         public Dictionary<string, int> SfxBindingVolumes = new Dictionary<string, int>(); // 键码(字符串) → 单键音量 0~100(缺省用全局)
@@ -75,6 +75,10 @@ namespace AutoClickerTool
         public bool AnimationsEnabled = true;   // 界面动效(悬停/按压/标签过渡); 关闭 = 全部瞬时(等效减少动态效果)
         public string Language = "zh";       // zh / en
         public string ThemeName = "Clay";    // Clay / ArtDeco / Skeuo / Surreal / Cyber / Y2K
+
+        // ---- 启动 ----
+        public bool AutoStart = false;      // 开机自启动(写 HKCU Run 键)
+        public bool StartMinimized = false; // 静默启动: 启动后不显示窗口, 最小化到系统托盘
 
         private static string FilePath
         {
@@ -136,13 +140,19 @@ namespace AutoClickerTool
         /// <summary>按 ConfigVersion 做增量迁移(旧版本存档加载时逐步升级到当前结构)。</summary>
         private static void Migrate(AppConfig cfg)
         {
-            // 当前版本为 2; 未来新增字段时在这里按 cfg.ConfigVersion 补齐, 最后设为最新版本号
+            // 当前版本为 3; 未来新增字段时在这里按 cfg.ConfigVersion 补齐, 最后设为最新版本号
             if (cfg.ConfigVersion < 2)
             {
                 // 例如: cfg.SpamKeyText = ""; 之类
                 Log.Warn(string.Format("配置从版本 {0} 迁移到 {1}", cfg.ConfigVersion, 2));
             }
-            cfg.ConfigVersion = 2;
+            if (cfg.ConfigVersion < 3)
+            {
+                // 新增 AutoStart/StartMinimized(默认 false, 无需迁移); 音效 SfxEnabled 默认改为 true 仅对新配置生效,
+                // 老配置保留其显式保存的值(无法区分"用户手动关闭"与"旧默认 false", 故不强制覆盖)。
+                Log.Warn(string.Format("配置从版本 {0} 迁移到 {1}", cfg.ConfigVersion, 3));
+            }
+            cfg.ConfigVersion = 3;
         }
 
         public void Save()

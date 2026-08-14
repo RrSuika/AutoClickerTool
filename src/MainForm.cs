@@ -145,6 +145,15 @@ namespace AutoClickerTool
         private Label lblStatus;
         private Button btnAbout;
 
+        // 启动与系统托盘
+        private CheckBox chkAutoStart;
+        private CheckBox chkSilentStart;
+        private NotifyIcon _trayIcon;
+        private ToolStripMenuItem _trayOpen;
+        private ToolStripMenuItem _trayExit;
+        private bool _firstShow = true;   // 静默启动: 拦截首次显示(之后恢复正常)
+        private bool _shutdownDone;       // 收尾只执行一次
+
         // 标签切换内容过渡
         private Panel _fadeOverlay;
         private Bitmap _fadeTo;
@@ -211,6 +220,8 @@ namespace AutoClickerTool
             _hotkeys.SetCallback(HotkeyAction.StopAll, () => Ui(() => StopAll()));
 
             ApplyConfigToUi(_cfg);
+            BuildTray();
+            AutoStart.SetEnabled(_cfg.AutoStart); // 注册表与配置保持一致(幂等)
             _hotkeys.Start();
             _sfx.Start();
             if (_loadNotes.Count > 0) SetStatus(string.Join("; ", _loadNotes.ToArray()));
@@ -940,13 +951,21 @@ namespace AutoClickerTool
             gbUi.Controls.Add(chkAnimations);
             page.Controls.Add(gbUi);
 
-            page.Controls.Add(Tip("Driver mode: install the driver (github.com/oblitum/Interception, admin) and put interception.dll next to this exe.\r\nHVCI (memory integrity) may block unsigned drivers; rename this exe to dodge process-name checks.", 12, 392));
+            // ---- 启动与托盘 ----
+            var gbStartup = Grp("Startup", 10, 386, 524, 48);
+            chkAutoStart = new ClayCheck { Name = "Start with Windows", Text = Lang.T("Start with Windows"), Location = new Point(Dpi.X(15), Dpi.X(28)) };
+            chkSilentStart = new ClayCheck { Name = "Start silently (to tray)", Text = Lang.T("Start silently (to tray)"), Location = new Point(Dpi.X(280), Dpi.X(28)) };
+            gbStartup.Controls.AddRange(new Control[] { chkAutoStart, chkSilentStart });
+            page.Controls.Add(gbStartup);
+
+            // 驱动模式说明改为悬停提示(页面已排满): 选中驱动模式无 dll 时状态栏也会额外警告
+            _hintTip.SetToolTip(cboMethod, Lang.T("Driver mode: install the driver (github.com/oblitum/Interception, admin) and put interception.dll next to this exe.\r\nHVCI (memory integrity) may block unsigned drivers; rename this exe to dodge process-name checks."));
         }
 
         private void BuildSfxPage(Panel page)
         {
             var gb = Grp("Key Sound Effects", 10, 10, 524, 128);
-            chkSfx = new ClayCheck { Name = "Enable key sound effects (new key overrides the playing sound)", Text = Lang.T("Enable key sound effects (new key overrides the playing sound)"), Location = new Point(Dpi.X(15), Dpi.X(28)), Checked = false };
+            chkSfx = new ClayCheck { Name = "Enable key sound effects (new key overrides the playing sound)", Text = Lang.T("Enable key sound effects (new key overrides the playing sound)"), Location = new Point(Dpi.X(15), Dpi.X(28)), Checked = true };
             // 全局音量滑块
             gb.Controls.Add(Lbl("Global volume:", 15, 60));
             sldGlobalVolume = new ClaySlider { Minimum = 0, Maximum = 100, Value = 100, Location = new Point(Dpi.X(110), Dpi.X(56)), Size = new Size(Dpi.X(150), Dpi.X(22)) };
@@ -1122,6 +1141,20 @@ namespace AutoClickerTool
                 SaveSettings();
                 Invalidate(true);
             };
+
+            // 启动与托盘
+            chkAutoStart.CheckedChanged += delegate
+            {
+                if (_applying) return;
+                AutoStart.SetEnabled(chkAutoStart.Checked);
+                SaveSettings();
+                SetStatus(chkAutoStart.Checked ? Lang.T("Auto-start enabled") : Lang.T("Auto-start disabled"));
+            };
+            chkSilentStart.CheckedChanged += delegate
+            {
+                if (_applying) return;
+                SaveSettings(); // 下次启动生效
+            };
         }
 
         // ---------- 语言 / 主题应用 ----------
@@ -1209,6 +1242,10 @@ namespace AutoClickerTool
             cboTheme.Items.Clear();
             foreach (var t in Theme.All) cboTheme.Items.Add(Lang.Code == "zh" ? t.NameZh : t.NameEn);
             cboTheme.SelectedIndex = Clamp(sel, 0, Theme.All.Length - 1);
+
+            if (_trayOpen != null) _trayOpen.Text = Lang.T("Show main window");
+            if (_trayExit != null) _trayExit.Text = Lang.T("Exit");
+            if (_trayIcon != null) _trayIcon.Text = Lang.F("Auto Clicker {0}", VersionInfo.Version);
 
             UpdateAllUi();
             RefreshEventList(false);
@@ -2374,6 +2411,8 @@ namespace AutoClickerTool
                 txtUntilTime.Text = string.IsNullOrEmpty(cfg.PlayUntilTime) ? "23:59" : cfg.PlayUntilTime;
                 txtUntilTime.Enabled = chkUntilTime.Checked;
                 chkTopmost.Checked = cfg.Topmost;
+                chkAutoStart.Checked = cfg.AutoStart;
+                chkSilentStart.Checked = cfg.StartMinimized;
 
                 ApplyHotkey(HotkeyAction.Clicker, cfg.ClickerHotkey);
                 ApplyHotkey(HotkeyAction.Record, cfg.RecordHotkey);
@@ -2508,6 +2547,8 @@ namespace AutoClickerTool
             _cfg.LaunchOnStart = chkLaunchStart.Checked;
             _cfg.LaunchOnEnd = chkLaunchEnd.Checked;
             _cfg.Topmost = chkTopmost.Checked;
+            _cfg.AutoStart = chkAutoStart.Checked;
+            _cfg.StartMinimized = chkSilentStart.Checked;
 
             _cfg.InjectionMethod = cboMethod.SelectedIndex == 0 ? "SendInput"
                 : (cboMethod.SelectedIndex == 1 ? "SendMessage" : "InterceptionDriver");
@@ -2636,6 +2677,65 @@ namespace AutoClickerTool
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            Shutdown();
+            base.OnFormClosing(e);
+        }
+
+        /// <summary>静默启动: 拦截首次显示, 让程序以托盘方式后台运行。</summary>
+        protected override void SetVisibleCore(bool value)
+        {
+            if (value && _firstShow)
+            {
+                _firstShow = false;
+                if (_cfg != null && _cfg.StartMinimized)
+                {
+                    base.SetVisibleCore(false);
+                    return;
+                }
+            }
+            base.SetVisibleCore(value);
+        }
+
+        /// <summary>创建系统托盘图标(常驻): 双击/菜单打开主界面, 右键菜单退出。</summary>
+        private void BuildTray()
+        {
+            var menu = new ContextMenuStrip();
+            _trayOpen = new ToolStripMenuItem { Name = "Show main window", Text = Lang.T("Show main window") };
+            _trayExit = new ToolStripMenuItem { Name = "Exit", Text = Lang.T("Exit") };
+            _trayOpen.Click += delegate { ShowFromTray(); };
+            _trayExit.Click += delegate { QuitFromTray(); };
+            menu.Items.Add(_trayOpen);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(_trayExit);
+
+            _trayIcon = new NotifyIcon
+            {
+                Icon = SystemIcons.Application,
+                Text = Lang.F("Auto Clicker {0}", VersionInfo.Version),
+                ContextMenuStrip = menu,
+                Visible = true
+            };
+            _trayIcon.DoubleClick += delegate { ShowFromTray(); };
+        }
+
+        private void ShowFromTray()
+        {
+            Show();
+            WindowState = FormWindowState.Normal;
+            Activate();
+        }
+
+        private void QuitFromTray()
+        {
+            Shutdown();
+            Application.Exit();
+        }
+
+        /// <summary>统一收尾: 停引擎/松键、释放钩子与音效、保存设置。仅执行一次(窗口关闭与托盘退出共用)。</summary>
+        private void Shutdown()
+        {
+            if (_shutdownDone) return;
+            _shutdownDone = true;
             StopAll();
             _recorder.Dispose();
             _hotkeys.Dispose();
@@ -2643,8 +2743,13 @@ namespace AutoClickerTool
             if (_statusTimer != null) _statusTimer.Stop();
             Anim.Clear();
             DisposeFadeBitmaps();
+            if (_trayIcon != null)
+            {
+                _trayIcon.Visible = false;
+                _trayIcon.Dispose();
+                _trayIcon = null;
+            }
             SaveSettings();
-            base.OnFormClosing(e);
         }
 
         /// <summary>崩溃兜底: 仅停引擎(触发各引擎 finally 松键), 不做任何 UI 操作, 不吞异常。</summary>

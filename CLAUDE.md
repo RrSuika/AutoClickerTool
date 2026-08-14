@@ -15,6 +15,7 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 7. **三套输入注入方式** — SendInput / SendMessage / Interception 驱动级
 8. **6 套主题 + 中英双语**，全部自绘控件（Clay 控件库），窗口边框/标题栏跟随主题
 9. **每显示器 DPI 感知** — 跨屏拖动/缩放变化自动重建布局，不会出现控件溢出窗口
+10. **开机自启动 + 静默启动 + 系统托盘** — 可选随 Windows 启动；静默启动时开机不弹窗、驻留托盘（双击托盘图标打开主界面，右键菜单退出）
 
 ## 2. 技术栈与硬约束（最重要）
 
@@ -48,6 +49,7 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 | [KeyboardSpammer.cs](src/KeyboardSpammer.cs) | 键盘连按引擎（Tap/Hold 两模式） |
 | [SoundFx.cs](src/SoundFx.cs) | 按键音效：`SfxPlayer`（MCI 播放 wav/mp3，覆盖式：新播放前 stop+close 旧音效）+ `SfxManager`（键盘钩子按绑定表触发，只监听不拦截，过滤注入按键） |
 | [AppConfig.cs](src/AppConfig.cs) | 配置模型（JavaScriptSerializer 序列化到 `config.json`）+ `MacrosDir`/`SoundsDir` 目录常量与 `EnsureDataDirs()` |
+| [AutoStart.cs](src/AutoStart.cs) | **开机自启动**：`IsEnabled()`/`SetEnabled(bool)` 写/删 `HKCU\...\CurrentVersion\Run` 的 `AutoClickerTool` 值（值=带引号 exe 路径，失败静默） |
 | [EventEditForms.cs](src/EventEditForms.cs) | 两个小对话框：`DelayEditForm`（改延迟）、`EventAddForm`（添加宏事件，含单击/按键点按类型） |
 | [HotkeyCaptureForm.cs](src/HotkeyCaptureForm.cs) | 热键捕获对话框：**低级钩子捕获**（支持媒体键/侧键），按下组合→全松开→返回 `Captured`（Esc 取消）；可选 hint 参数被音效绑定复用 |
 | [WelcomeForm.cs](src/WelcomeForm.cs) | 首次启动欢迎窗口：选择默认语言 + 功能介绍 + 已阅关闭（`MainForm` 在 `config.json` 不存在时于 `Shown` 事件弹出） |
@@ -86,7 +88,7 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 
 ### 4.5 按键音效
 - 绑定表存 config：单键 `SfxBindings: Dictionary<string,string>`(键码字符串→文件名) + `SfxBindingVolumes: Dictionary<string,int>`(键码字符串→音量 0~100)——**键必须用字符串**，见坑 13；组合键 `SfxComboBindings: Dictionary<string,string>`(组合串如 "Ctrl+C"→文件名) + `SfxComboVolumes`(组合串→音量)。`SfxManager` 全局键盘钩子监听（**只监听不拦截**，与热键/录制并行），维护 `_down` 归一化按下集合：单键命中 `Bindings` 即播，组合键 `Satisfied()`(所有修饰键+键都按住)即播 → `SfxPlayer.Play(path, volume)`（MCI：新播放前 stop+close 旧的 = 覆盖式，`setaudio <alias> volume to N`，waveaudio 支持、mpegvideo 不支持静默忽略）。过滤注入按键（宏回放不触发音效）
-- 音效页：总开关 + **全局音量滑块**（`sldGlobalVolume` 0~100 → `SfxVolume`）+ **选中项音量滑块**（`sldKeyVolume`，选中列表项后单独覆盖全局）+ 添加绑定（复用 HotkeyCaptureForm 捕获**单键或组合键**）+ 删除/试听/打开 Sounds 文件夹。统一列表用内部 `SfxKey` 条目(单键/组合键)填充；滑块是自绘 `ClaySlider`（不用系统原生 TrackBar）
+- 音效页：总开关 + **全局音量滑块**（`sldGlobalVolume` 0~100 → `SfxVolume`）+ **选中项音量滑块**（`sldKeyVolume`，选中列表项后单独覆盖全局）+ 添加绑定（复用 HotkeyCaptureForm 捕获**单键或组合键**）+ 删除/试听/打开 Sounds 文件夹。统一列表用内部 `SfxKey` 条目(单键/组合键)填充；滑块是自绘 `ClaySlider`（不用系统原生 TrackBar）。`SfxEnabled` 默认**开启**（新安装即生效；老配置保留已存值）
 
 ### 4.6 主题系统
 - `Theme.Current` 提供全部颜色 + 风格开关（Dark=深色、Glow=霓虹光晕、Bevel=拟物斜面、Radius=圆角）
@@ -109,6 +111,13 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 - `AppConfig` 字段即 config.json 结构；界面改动即时 `SaveSettings()`（从控件读值 → 写 `_cfg` → Save）
 - 启动流程：`Load` → 按语言/主题构建 UI → `ApplyConfigToUi` 回填（`_applying` 标志抑制控件事件）→ `PushToEngines` 把注入/拟人化设置同步到各静态引擎
 - **新增配置项**：AppConfig 加字段 + ApplyConfigToUi 回填 + SaveSettings 同步 + PushToEngines 转给引擎（按需），缺一不可
+
+### 4.9 启动与系统托盘
+- 两个开关在「高级设置」页「启动」卡片：`AutoStart`(开机自启动) / `StartMinimized`(静默启动)
+- 开机自启动：`AutoStart.SetEnabled(bool)` 写/删 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 的 `AutoClickerTool` 值(值 = 带引号的 exe 路径)。ctor 里 `SetEnabled(_cfg.AutoStart)` 幂等对齐注册表与配置；勾选时即时写注册表 + 保存
+- 静默启动：`MainForm.SetVisibleCore` 拦截**首次** `Show`（`_firstShow` 标志消费一次后恢复正常），使程序启动后不弹窗、以托盘后台运行
+- 托盘：`BuildTray()` 创建**常驻** `NotifyIcon`（双击 = 打开主界面，右键菜单 = 显示主界面/退出）；`Shutdown()` 统一收尾（停引擎松键、释放钩子/音效、保存设置，`_shutdownDone` 保证只执行一次），窗口关闭(X)与托盘「退出」共用。`ApplyLanguage` 里同步刷新托盘菜单文案与图标文本
+- **注意**：静默启动只对「启动那一刻」生效；打开主界面后点 X 仍是**退出程序**（不会缩回托盘）
 
 ## 5. UI 结构
 
