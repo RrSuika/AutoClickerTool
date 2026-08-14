@@ -42,9 +42,10 @@ namespace AutoClickerTool
                     else key.DeleteValue(ValueName, false);
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // 无权限 / 注册表被限制等, 静默失败
+                // 无权限 / 注册表被限制等; 记录日志便于诊断(通常只在受限环境出现)
+                Log.Warn("开机自启动设置失败(" + (enabled ? "开启" : "关闭") + "): " + ex.Message);
             }
         }
     }

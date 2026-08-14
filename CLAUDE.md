@@ -24,6 +24,7 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 - **语法上限 = C# 5**：禁止字符串插值 `$""`、`?.`、`??`、`nameof`、表达式体成员、局部函数、`out var`、`Math.Clamp`。已有代码风格就是模板
 - **中文文件路径**：编译参数带 `/codepage:65001`，源码统一 UTF-8
 - 新增 `.cs` 文件后**必须把它加进 build.bat 的编译列表**，否则不会参与编译
+- **应用图标**：`src\app.ico` 经 `/win32icon:app.ico` 嵌入 exe（窗口/任务栏/托盘共用）；由 [make_icon.ps1](tools/make_icon.ps1) 生成（多尺寸 PNG 打包 ICO，改图标后重跑该脚本再 build）
 - 编译前若 AutoClicker.exe 正在运行，会因文件占用失败 → 先关闭程序
 - 所有 Win32 API 走 [NativeMethods.cs](src/NativeMethods.cs) 的 P/Invoke，不引入新 DLL
 
@@ -54,6 +55,7 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 | [HotkeyCaptureForm.cs](src/HotkeyCaptureForm.cs) | 热键捕获对话框：**低级钩子捕获**（支持媒体键/侧键），按下组合→全松开→返回 `Captured`（Esc 取消）；可选 hint 参数被音效绑定复用 |
 | [WelcomeForm.cs](src/WelcomeForm.cs) | 首次启动欢迎窗口：选择默认语言 + 功能介绍 + 已阅关闭（`MainForm` 在 `config.json` 不存在时于 `Shown` 事件弹出） |
 | [AboutForm.cs](src/AboutForm.cs) | 「关于」对话框：版本/作者/项目主页/开源申明(MIT)/免责声明；作者与网址在文件顶部 `AUTHOR`/`WEBSITE` 常量处替换，双语文本在 `ApplyTexts` 里维护。入口在底部状态栏「关于」按钮 |
+| [app.ico](src/app.ico) | 应用图标（16~256px 多尺寸，`/win32icon` 嵌入 exe，窗口/任务栏/托盘共用；由 `tools/make_icon.ps1` 生成） |
 | [使用说明.txt](../使用说明.txt) | 用户手册 |
 | [config.json](../config.json) | 运行时生成的设置存档（删掉=恢复默认） |
 

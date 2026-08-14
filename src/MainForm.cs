@@ -151,6 +151,7 @@ namespace AutoClickerTool
         private NotifyIcon _trayIcon;
         private ToolStripMenuItem _trayOpen;
         private ToolStripMenuItem _trayExit;
+        private Icon _trayAppIcon;         // 从 exe 提取的图标(需手动释放)
         private bool _firstShow = true;   // 静默启动: 拦截首次显示(之后恢复正常)
         private bool _shutdownDone;       // 收尾只执行一次
 
@@ -936,7 +937,7 @@ namespace AutoClickerTool
             page.Controls.Add(gbHuman);
 
             // ---- 界面: 语言与主题 / 动效 ----
-            var gbUi = Grp("Interface", 10, 290, 524, 92);
+            var gbUi = Grp("Interface", 10, 290, 524, 84);
             gbUi.Controls.Add(Lbl("Language:", 15, 28));
             cboLanguage = new ClayComboBox();
             cboLanguage.Items.AddRange(new object[] { Lang.T("中文"), Lang.T("English") });
@@ -952,9 +953,9 @@ namespace AutoClickerTool
             page.Controls.Add(gbUi);
 
             // ---- 启动与托盘 ----
-            var gbStartup = Grp("Startup", 10, 386, 524, 48);
-            chkAutoStart = new ClayCheck { Name = "Start with Windows", Text = Lang.T("Start with Windows"), Location = new Point(Dpi.X(15), Dpi.X(28)) };
-            chkSilentStart = new ClayCheck { Name = "Start silently (to tray)", Text = Lang.T("Start silently (to tray)"), Location = new Point(Dpi.X(280), Dpi.X(28)) };
+            var gbStartup = Grp("Startup", 10, 378, 524, 56);
+            chkAutoStart = new ClayCheck { Name = "Start with Windows", Text = Lang.T("Start with Windows"), Location = new Point(Dpi.X(15), Dpi.X(30)) };
+            chkSilentStart = new ClayCheck { Name = "Start silently (to tray)", Text = Lang.T("Start silently (to tray)"), Location = new Point(Dpi.X(280), Dpi.X(30)) };
             gbStartup.Controls.AddRange(new Control[] { chkAutoStart, chkSilentStart });
             page.Controls.Add(gbStartup);
 
@@ -2699,6 +2700,9 @@ namespace AutoClickerTool
         /// <summary>创建系统托盘图标(常驻): 双击/菜单打开主界面, 右键菜单退出。</summary>
         private void BuildTray()
         {
+            try { _trayAppIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
+            catch (Exception) { _trayAppIcon = null; }
+
             var menu = new ContextMenuStrip();
             _trayOpen = new ToolStripMenuItem { Name = "Show main window", Text = Lang.T("Show main window") };
             _trayExit = new ToolStripMenuItem { Name = "Exit", Text = Lang.T("Exit") };
@@ -2710,7 +2714,7 @@ namespace AutoClickerTool
 
             _trayIcon = new NotifyIcon
             {
-                Icon = SystemIcons.Application,
+                Icon = _trayAppIcon ?? SystemIcons.Application,
                 Text = Lang.F("Auto Clicker {0}", VersionInfo.Version),
                 ContextMenuStrip = menu,
                 Visible = true
@@ -2748,6 +2752,11 @@ namespace AutoClickerTool
                 _trayIcon.Visible = false;
                 _trayIcon.Dispose();
                 _trayIcon = null;
+            }
+            if (_trayAppIcon != null)
+            {
+                _trayAppIcon.Dispose();
+                _trayAppIcon = null;
             }
             SaveSettings();
         }
