@@ -71,6 +71,27 @@ namespace AutoClickerTool
             return p;
         }
 
+        /// <summary>给任意窗口应用主题边框色/标题栏色/深色模式(DWM 属性, 旧系统静默失败)。
+        /// 主窗口与所有对话框(关于/欢迎/捕获等)共用, 保证弹窗边框与主题一致。</summary>
+        public static void ApplyFrameTheme(IntPtr handle)
+        {
+            if (handle == IntPtr.Zero) return;
+            try
+            {
+                int dark = Theme.Current.Dark ? 1 : 0;
+                NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
+                NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, ref dark, sizeof(int));
+                int border = ColorTranslator.ToWin32(Theme.Current.WindowBg);
+                NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_BORDER_COLOR, ref border, sizeof(int));
+                int caption = ColorTranslator.ToWin32(Theme.Current.CardBg);
+                NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_CAPTION_COLOR, ref caption, sizeof(int));
+            }
+            catch (Exception)
+            {
+                // 旧系统不支持这些属性, 静默忽略
+            }
+        }
+
         /// <summary>
         /// 阴影: 霓虹主题画光晕(多圈半透明描边), 常规主题画硬偏移阴影。
         /// bg 为阴影背后的背景色(已填充的四角底色), 用于把半透明阴影预混成不透明色,
@@ -278,7 +299,7 @@ namespace AutoClickerTool
             if (_fitKey == key) return _fitFont;
             if (_fitFont != null) { _fitFont.Dispose(); _fitFont = null; }
             _fitKey = key;
-            int avail = bodyWidth - 8;
+            int avail = bodyWidth - 4;
             if (avail < 8) return null;
             Size sz = TextRenderer.MeasureText(Text, Font);
             if (sz.Width <= avail) return null;
@@ -369,9 +390,10 @@ namespace AutoClickerTool
                 }
             }
 
-            // 文字(放不下时先缩小字号, 再放不下才截断)
-            Font tf = FitFont(body.Width);
-            TextRenderer.DrawText(g, Text, tf != null ? tf : Font, body, Enabled ? ForeColor : Clay.InkSoft,
+            // 文字(左右各留 6px 内边距, 放不下时先缩小字号, 再放不下才截断)
+            Rectangle textRect = Rectangle.Inflate(body, -6, 0);
+            Font tf = FitFont(textRect.Width);
+            TextRenderer.DrawText(g, Text, tf != null ? tf : Font, textRect, Enabled ? ForeColor : Clay.InkSoft,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
 
             // 焦点虚线环(淡入淡出)

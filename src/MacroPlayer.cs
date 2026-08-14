@@ -90,21 +90,7 @@ namespace AutoClickerTool
                 int played = 0;
 
                 // 运行到时刻: 解析一次; 目标时刻已过(如 22:00 设 03:00)视为次日, 支持过夜挂机
-                DateTime? untilTarget = null;
-                if (!string.IsNullOrEmpty(UntilTime))
-                {
-                    DateTime until;
-                    if (DateTime.TryParseExact(UntilTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out until))
-                    {
-                        until = DateTime.Today.Add(until.TimeOfDay);
-                        if (until <= DateTime.Now) until = until.AddDays(1);
-                        untilTarget = until;
-                    }
-                    else
-                    {
-                        Log.Warn("运行到时刻解析失败, 已忽略: " + UntilTime);
-                    }
-                }
+                DateTime? untilTarget = Util.ParseUntilTime(UntilTime);
 
                 do
                 {

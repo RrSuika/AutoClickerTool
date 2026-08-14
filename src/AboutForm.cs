@@ -38,6 +38,7 @@ namespace AutoClickerTool
                 Size = new Size(Dpi.X(450), Dpi.X(400)),
                 BackColor = Clay.CardBg
             };
+            HandleCreated += delegate { Clay.ApplyFrameTheme(Handle); };
 
             _lblTitle = new Label
             {

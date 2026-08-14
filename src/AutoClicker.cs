@@ -21,6 +21,8 @@ namespace AutoClickerTool
         public int FixedX { get; set; }
         public int FixedY { get; set; }
         public int RepeatCount { get; set; } // 0 = 无限
+        public int RunMinutes { get; set; }     // 运行分钟数, 0 = 不限
+        public string UntilTime { get; set; }   // 运行到系统时刻 "HH:mm", 空 = 不限
 
         public void Start()
         {
@@ -60,6 +62,8 @@ namespace AutoClickerTool
         private void Loop(int gen)
         {
             long count = 0;
+            DateTime started = DateTime.Now;
+            DateTime? untilTarget = Util.ParseUntilTime(UntilTime);
             try
             {
                 while (Alive(gen))
@@ -78,6 +82,8 @@ namespace AutoClickerTool
 
                     count++;
                     if (RepeatCount > 0 && count >= RepeatCount) break;
+                    if (RunMinutes > 0 && (DateTime.Now - started).TotalMinutes >= RunMinutes) break;
+                    if (untilTarget.HasValue && DateTime.Now >= untilTarget.Value) break;
 
                     // 分段休眠，保证 Stop() 在长间隔下也能快速响应
                     int sleep = Math.Max(1, Humanizer.NextInterval(IntervalMs));

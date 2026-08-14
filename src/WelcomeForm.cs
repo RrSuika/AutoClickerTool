@@ -27,6 +27,7 @@ namespace AutoClickerTool
             AutoScaleMode = AutoScaleMode.None;
             Font = new Font("Microsoft YaHei UI", 9F);
             BackColor = Clay.WindowBg;
+            HandleCreated += delegate { Clay.ApplyFrameTheme(Handle); };
 
             _title = new Label
             {

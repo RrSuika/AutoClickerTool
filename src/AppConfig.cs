@@ -32,12 +32,16 @@ namespace AutoClickerTool
         public int ClickFixedX = 0;
         public int ClickFixedY = 0;
         public int ClickRepeatCount = 0;     // 0 = 无限
+        public int ClickMinutes = 0;         // 运行分钟数, 0 = 不限
+        public string ClickUntilTime = "";   // 运行到系统时刻 "HH:mm", 空 = 不限
 
         // ---- 键盘连按 ----
         public int SpamVk = 0x41;            // 虚拟键码, 默认 A
         public string SpamKeyText = "";      // 键盘连按页直接输入的按键文本(空 = 用下拉框选择)
         public int SpamIntervalMs = 100;
         public bool SpamHold = false;
+        public int SpamMinutes = 0;          // 运行分钟数, 0 = 不限
+        public string SpamUntilTime = "";    // 运行到系统时刻 "HH:mm", 空 = 不限
 
         // ---- 录制回放 ----
         public double PlaySpeed = 1.0;

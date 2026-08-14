@@ -58,6 +58,7 @@ namespace AutoClickerTool
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
+            Clay.ApplyFrameTheme(Handle); // 弹窗边框跟随主题
             // 模态循环期间 UI 线程持续泵消息, 低级钩子可正常工作
             _kbHook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_KEYBOARD_LL, _kbProc, NativeMethods.GetModuleHandle(null), 0);
             _mouseHook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_MOUSE_LL, _mouseProc, NativeMethods.GetModuleHandle(null), 0);

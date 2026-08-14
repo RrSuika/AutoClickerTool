@@ -154,7 +154,10 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 17. **回放停止时按住键要补发抬起**：`MacroPlayer` 回放中 `LeftDown/KeyDown/KeyComboDown` 后若未到对应 `Up` 事件就停止，键会卡住。按住状态是 **`Run()` 局部 HeldState**（`ReleaseHeld(held)` 在 finally 补发抬起）——线程局部化后旧代线程不会干扰新代按键；同理 `KeyboardSpammer` Hold 模式已在 finally 松开
 18. **引擎 Stop→Start 竞态**：三个引擎用**代际计数**防双线程并发——`Stop()` 置 flag 并自增 `_gen`，线程创建时绑定当时的代际，循环内 `Alive(gen)` 同时比对 flag 与代际，finally 里只有当前代际的线程才清 flag/触发事件。退出时 `Shutdown()` 调 `WaitExit(500)`（超时 Abort，确保 finally 已执行）再结束进程
 19. **config.json 是不可信输入**：`AppConfig.Load` 里 `SanitizeUntrusted` 清洗——`LaunchPrograms` 只保留绝对路径且扩展名为 exe/lnk（bat/cmd/URL 丢弃并 Log.Warn）；音效绑定值必须等于 `Path.GetFileName(v)`（防 `..\` 路径穿越）。「软件控制」的 AddProgram 对话框只允许 exe/lnk，`LaunchPrograms()` 运行时二次校验白名单
-20. **标签条与按钮文字宽度**：标签条 `LayoutTabStrip()` 按当前语言文本测量所需宽度等比分配（构建与 `ApplyLanguage` 时调用；构建期条宽未布局时用 546 兜底）；`ClayButton` 文字放不下自动缩字号（下限 7pt）。新增按钮时无需手工计算文字宽度
+20. **标签条与按钮文字宽度**：标签条 `LayoutTabStrip()` 按当前语言文本测量所需宽度——放得下时用自然宽度(**只有需要压缩时才按比例分配**, 最后一块吃余量), 放不下等比压缩；构建、`ApplyLanguage`、窗口 `Resize` 时都调用（构建期条宽未布局时用 546 兜底）。`ClayButton` 文字绘制在左右各 6px 内边距的矩形里，放不下自动缩字号（下限 7pt）。新增按钮时无需手工计算文字宽度
+21. **窗口尺寸与 DPI**：`ClientSize = Dpi.X(560)×Dpi.X(530)` 是设计尺寸；`WM_DPICHANGED` 里只采用系统建议的**位置**，尺寸强制回到设计尺寸（否则建议矩形可能与布局宽度不一致, 右侧控件被窗口边缘裁掉）。状态栏「关于」/版本号右锚定、状态文本固定宽+省略号；卡片内控件一律固定坐标（不要右锚定, 否则拉大窗口时被拖走）
+22. **弹窗也要套主题边框**：主窗口与所有对话框（关于/欢迎/热键捕获/事件编辑）共用 `Clay.ApplyFrameTheme(Handle)`（DWM 边框色/标题栏色/深色模式），新加对话框时别漏；任务栏图标 = 主窗口 `Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath)`（与 exe 图标一致）
+23. **连点/连按也支持运行时长与到点停止**：`AutoClicker`/`KeyboardSpammer` 有 `RunMinutes`(0=不限)/`UntilTime`("HH:mm", 空=不限)，解析走 `Util.ParseUntilTime`（跨天=次日, 过夜挂机）；配置字段 `ClickMinutes/ClickUntilTime/SpamMinutes/SpamUntilTime`；三个引擎停止条件检查位置各自在循环体内（Hold 模式按 10ms 粒度检查）
 
 ## 7. 验证流程
 

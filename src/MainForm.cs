@@ -80,6 +80,14 @@ namespace AutoClickerTool
         private TextBox txtUntilTime;
         private Label lblLoopHint;
 
+        // 连点/连按 运行时长与定时停止
+        private NumericUpDown numClickMinutes;
+        private CheckBox chkClickUntil;
+        private TextBox txtClickUntil;
+        private NumericUpDown numSpamMinutes;
+        private CheckBox chkSpamUntil;
+        private TextBox txtSpamUntil;
+
         // 宏库页
         private ListView lstMacros;
         private Button btnMacroRename;
@@ -170,6 +178,9 @@ namespace AutoClickerTool
 
         public MainForm()
         {
+            // 任务栏图标与 exe 图标一致(取 exe 内嵌的 /win32icon 图标)
+            try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch (Exception) { }
+
             // 先加载配置, 用配置的语言/主题构建整个界面
             string cfgError;
             _cfg = AppConfig.Load(out cfgError);
@@ -199,6 +210,8 @@ namespace AutoClickerTool
             BuildKeyOptions();
             BuildUi();
             WireEvents();
+            // 窗口缩放时重排标签条宽度(不压缩时按文本自然宽度, 无余量堆积)
+            Resize += delegate { LayoutTabStrip(); };
 
             _clicker.Stopped += () => Ui(() => { UpdateClickerUi(); SetStatus(Lang.T("Clicker stopped")); });
             _spammer.Stopped += () => Ui(() => { UpdateKeyboardUi(); SetStatus(Lang.T("Keyboard spam stopped")); });
@@ -450,10 +463,11 @@ namespace AutoClickerTool
                 int w = nat[i];
                 if (total > avail)
                 {
+                    // 需要压缩时按比例分配, 最后一块吃掉余量, 总宽恰好铺满
                     w = nat[i] * avail / total;
                     if (w < min) w = min;
+                    if (i == n - 1) w = avail - used;
                 }
-                if (i == n - 1) w = avail - used; // 最后一块吃掉余量, 总宽恰好铺满
                 _tabBtns[i].SetBounds(x, Dpi.X(3), w, Dpi.X(28));
                 x += w;
                 used += w;
@@ -468,7 +482,8 @@ namespace AutoClickerTool
                 Text = Lang.T("Ready"),
                 Location = new Point(Dpi.X(12), Dpi.X(5)),
                 Size = new Size(Dpi.X(300), Dpi.X(16)),
-                Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
+                // 固定宽度(不再 Right 锚定): 避免窗口拉大时状态文本向右生长盖住右侧的 关于/版本
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
                 AutoEllipsis = true,
                 ForeColor = Clay.InkSoft,
                 BackColor = Theme.Current.StatusBg
@@ -478,8 +493,10 @@ namespace AutoClickerTool
             {
                 Name = "About",
                 Text = Lang.T("About"),
-                Location = new Point(Dpi.X(320), Dpi.X(1)),
+                Location = new Point(Dpi.X(365), Dpi.X(1)),
                 Size = new Size(Dpi.X(55), Dpi.X(24)),
+                // 右锚定: 窗口拉大时随右缘移动, 不会被状态文本覆盖
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
                 BackColor = Theme.Current.StatusBg
             };
             _statusBar.Controls.Add(btnAbout);
@@ -616,7 +633,8 @@ namespace AutoClickerTool
 
         private void BuildClickerPage(Panel page)
         {
-            var gb = Grp("Click Settings", 10, 10, 524, 128);
+            var gb = Grp("Click Settings", 10, 10, 524, 148);
+            // 行1: 间隔 + 鼠标键(英文标签较长, 输入框右移留足间隙)
             gb.Controls.Add(Lbl("Interval (ms):", 15, 33));
             numInterval = new ClayNumericUpDown { Minimum = 1, Maximum = 3600000, Value = 100, BorderStyle = BorderStyle.None };
             gb.Controls.Add(ClayKit.InputShell(numInterval, 95, 29, 80));
@@ -624,59 +642,77 @@ namespace AutoClickerTool
             cboButton = new ClayComboBox();
             cboButton.Items.AddRange(new object[] { Lang.T("Left"), Lang.T("Right"), Lang.T("Middle") });
             cboButton.SelectedIndex = 0;
-            gb.Controls.Add(ClayKit.InputShell(cboButton, 270, 29, 80));
-            rbFollow = new ClayRadio { Name = "Follow cursor", Text = Lang.T("Follow cursor"), Location = new Point(Dpi.X(15), Dpi.X(66)), Checked = true };
-            rbFixed = new ClayRadio { Name = "Fixed position:", Text = Lang.T("Fixed position:"), Location = new Point(Dpi.X(15), Dpi.X(93)) };
+            gb.Controls.Add(ClayKit.InputShell(cboButton, 310, 29, 80));
+            // 行2: 次数 + 运行分钟 + 运行到时刻(新增停止条件)
+            gb.Controls.Add(Lbl("Count (0=infinite):", 15, 65));
+            numRepeat = new ClayNumericUpDown { Minimum = 0, Maximum = 100000000, Value = 0, BorderStyle = BorderStyle.None };
+            gb.Controls.Add(ClayKit.InputShell(numRepeat, 145, 61, 66));
+            gb.Controls.Add(Lbl("Run minutes:", 245, 65));
+            numClickMinutes = new ClayNumericUpDown { Minimum = 0, Maximum = 99999, Value = 0, BorderStyle = BorderStyle.None };
+            gb.Controls.Add(ClayKit.InputShell(numClickMinutes, 345, 61, 50));
+            gb.Controls.Add(Lbl("Until:", 400, 65));
+            chkClickUntil = new ClayCheck { Location = new Point(Dpi.X(458), Dpi.X(63)) };
+            txtClickUntil = new TextBox { BorderStyle = BorderStyle.None, Text = "23:59", MaxLength = 5, Enabled = false };
+            gb.Controls.Add(ClayKit.InputShell(txtClickUntil, 483, 61, 38));
+            chkClickUntil.CheckedChanged += delegate { txtClickUntil.Enabled = chkClickUntil.Checked; if (!_applying) SaveSettings(); };
+            // 行3: 跟随/固定坐标
+            rbFollow = new ClayRadio { Name = "Follow cursor", Text = Lang.T("Follow cursor"), Location = new Point(Dpi.X(15), Dpi.X(97)), Checked = true };
+            rbFixed = new ClayRadio { Name = "Fixed position:", Text = Lang.T("Fixed position:"), Location = new Point(Dpi.X(160), Dpi.X(97)) };
+            // 行4: 固定坐标 X/Y + 抓取按钮
             numX = new ClayNumericUpDown { Minimum = 0, Maximum = 20000, Value = 0, BorderStyle = BorderStyle.None };
             numY = new ClayNumericUpDown { Minimum = 0, Maximum = 20000, Value = 0, BorderStyle = BorderStyle.None };
-            gb.Controls.Add(ClayKit.InputShell(numX, 105, 90, 70));
-            gb.Controls.Add(ClayKit.InputShell(numY, 195, 90, 70));
-            btnGetPos = new ClayButton { Name = "Get mouse position", Text = Lang.T("Get mouse position"), Location = new Point(Dpi.X(280), Dpi.X(89)), Size = new Size(Dpi.X(140), Dpi.X(26)) };
-            var lblRepeat = Lbl("Count (0=infinite):", 395, 33);
-            lblRepeat.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            gb.Controls.Add(lblRepeat);
-            numRepeat = new ClayNumericUpDown { Minimum = 0, Maximum = 100000000, Value = 0, BorderStyle = BorderStyle.None };
-            var repeatShell = ClayKit.InputShell(numRepeat, 445, 29, 66);
-            repeatShell.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            gb.Controls.Add(repeatShell);
-            gb.Controls.AddRange(new Control[] { rbFollow, rbFixed, btnGetPos });
+            gb.Controls.Add(ClayKit.InputShell(numX, 160, 117, 70));
+            gb.Controls.Add(ClayKit.InputShell(numY, 245, 117, 70));
+            btnGetPos = new ClayButton { Name = "Get mouse position", Text = Lang.T("Get mouse position"), Location = new Point(Dpi.X(330), Dpi.X(116)), Size = new Size(Dpi.X(140), Dpi.X(26)) };
+            gb.Controls.AddRange(new Control[] { rbFollow, rbFixed, btnGetPos, chkClickUntil });
             page.Controls.Add(gb);
 
-            btnClickerToggle = new ClayButton { Text = Lang.F("Start clicking ({0})", "F6"), Location = new Point(Dpi.X(15), Dpi.X(150)), Size = new Size(Dpi.X(175), Dpi.X(42)), Accent = true, BackColor = Clay.WindowBg };
-            btnTestClick = new ClayButton { Name = "Test", Text = Lang.T("Test"), Location = new Point(Dpi.X(200), Dpi.X(150)), Size = new Size(Dpi.X(100), Dpi.X(42)), Mint = true, BackColor = Clay.WindowBg };
-            lblClickerState = new Label { Text = Lang.T("Status: Idle"), Location = new Point(Dpi.X(310), Dpi.X(163)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
+            btnClickerToggle = new ClayButton { Text = Lang.F("Start clicking ({0})", "F6"), Location = new Point(Dpi.X(15), Dpi.X(175)), Size = new Size(Dpi.X(175), Dpi.X(42)), Accent = true, BackColor = Clay.WindowBg };
+            btnTestClick = new ClayButton { Name = "Test", Text = Lang.T("Test"), Location = new Point(Dpi.X(200), Dpi.X(175)), Size = new Size(Dpi.X(100), Dpi.X(42)), Mint = true, BackColor = Clay.WindowBg };
+            lblClickerState = new Label { Text = Lang.T("Status: Idle"), Location = new Point(Dpi.X(310), Dpi.X(188)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
             page.Controls.AddRange(new Control[] { btnClickerToggle, btnTestClick, lblClickerState });
 
-            page.Controls.Add(Tip("Tip: move the mouse to the target after starting. Do not click Start while the cursor is on the button,\r\nor it will click the button itself. If the game blocks standard injection, switch method in Advanced.", 12, 205));
+            page.Controls.Add(Tip("Tip: move the mouse to the target after starting. Do not click Start while the cursor is on the button,\r\nor it will click the button itself. If the game blocks standard injection, switch method in Advanced.", 12, 232));
         }
 
         private void BuildKeyboardPage(Panel page)
         {
-            var gb = Grp("Key Settings", 10, 10, 524, 150);
+            var gb = Grp("Key Settings", 10, 10, 524, 158);
             gb.Controls.Add(Lbl("Key:", 15, 33));
             cboKey = new ClayComboBox();
             foreach (var kv in _keyOptions) cboKey.Items.Add(kv.Key);
             cboKey.SelectedIndex = 0;
             gb.Controls.Add(ClayKit.InputShell(cboKey, 60, 29, 115));
-            rbTap = new ClayRadio { Name = "Tap (click once per interval)", Text = Lang.T("Tap (click once per interval)"), Location = new Point(Dpi.X(200), Dpi.X(32)), Checked = true };
-            rbHold = new ClayRadio { Name = "Hold (until stopped)", Text = Lang.T("Hold (until stopped)"), Location = new Point(Dpi.X(360), Dpi.X(32)) };
 
             // 直接输入按键: 免去在下拉列表里逐个翻找
             gb.Controls.Add(Lbl("or type a key:", 15, 67));
             txtKey = new TextBox { BorderStyle = BorderStyle.None, MaxLength = 16 };
             gb.Controls.Add(ClayKit.InputShell(txtKey, 135, 63, 105));
 
+            // 行3: 间隔 + 运行分钟 + 运行到时刻(新增停止条件; 英文标签较长, 输入框右移)
             gb.Controls.Add(Lbl("Interval (ms):", 15, 101));
             numKeyInterval = new ClayNumericUpDown { Minimum = 1, Maximum = 3600000, Value = 100, BorderStyle = BorderStyle.None };
-            gb.Controls.Add(ClayKit.InputShell(numKeyInterval, 95, 97, 80));
-            gb.Controls.AddRange(new Control[] { rbTap, rbHold });
+            gb.Controls.Add(ClayKit.InputShell(numKeyInterval, 110, 97, 80));
+            gb.Controls.Add(Lbl("Run minutes:", 245, 101));
+            numSpamMinutes = new ClayNumericUpDown { Minimum = 0, Maximum = 99999, Value = 0, BorderStyle = BorderStyle.None };
+            gb.Controls.Add(ClayKit.InputShell(numSpamMinutes, 345, 97, 50));
+            gb.Controls.Add(Lbl("Until:", 400, 101));
+            chkSpamUntil = new ClayCheck { Location = new Point(Dpi.X(458), Dpi.X(99)) };
+            txtSpamUntil = new TextBox { BorderStyle = BorderStyle.None, Text = "23:59", MaxLength = 5, Enabled = false };
+            gb.Controls.Add(ClayKit.InputShell(txtSpamUntil, 483, 97, 38));
+            chkSpamUntil.CheckedChanged += delegate { txtSpamUntil.Enabled = chkSpamUntil.Checked; if (!_applying) SaveSettings(); };
+
+            // 行4: 点按/按住(英文文案较长, 各占一行位置)
+            rbTap = new ClayRadio { Name = "Tap (click once per interval)", Text = Lang.T("Tap (click once per interval)"), Location = new Point(Dpi.X(15), Dpi.X(129)), Checked = true };
+            rbHold = new ClayRadio { Name = "Hold (until stopped)", Text = Lang.T("Hold (until stopped)"), Location = new Point(Dpi.X(220), Dpi.X(129)) };
+            gb.Controls.AddRange(new Control[] { rbTap, rbHold, chkSpamUntil });
             page.Controls.Add(gb);
 
-            btnKeyboardToggle = new ClayButton { Text = Lang.F("Start spam ({0})", "F9"), Location = new Point(Dpi.X(15), Dpi.X(175)), Size = new Size(Dpi.X(170), Dpi.X(42)), Accent = true, BackColor = Clay.WindowBg };
-            lblKeyboardState = new Label { Text = Lang.T("Status: Idle"), Location = new Point(Dpi.X(195), Dpi.X(187)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
+            btnKeyboardToggle = new ClayButton { Text = Lang.F("Start spam ({0})", "F9"), Location = new Point(Dpi.X(15), Dpi.X(195)), Size = new Size(Dpi.X(170), Dpi.X(42)), Accent = true, BackColor = Clay.WindowBg };
+            lblKeyboardState = new Label { Text = Lang.T("Status: Idle"), Location = new Point(Dpi.X(195), Dpi.X(208)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
             page.Controls.AddRange(new Control[] { btnKeyboardToggle, lblKeyboardState });
 
-            page.Controls.Add(Tip("Tip: keys go to the foreground window. Switch to the target window first, then toggle with the hotkey.\r\nOr type a key directly: a letter/number, or a name like F1 / Space / Enter.", 12, 232));
+            page.Controls.Add(Tip("Tip: keys go to the foreground window. Switch to the target window first, then toggle with the hotkey.\r\nOr type a key directly: a letter/number, or a name like F1 / Space / Enter.", 12, 252));
         }
 
         private void BuildMacroPage(Panel page)
@@ -903,8 +939,8 @@ namespace AutoClickerTool
             btnProgramAdd = new ClayButton { Name = "Add program...", Text = Lang.T("Add program..."), Location = new Point(Dpi.X(325), Dpi.X(28)), Size = new Size(Dpi.X(130), Dpi.X(30)) };
             btnProgramRemove = new ClayButton { Name = "Remove program", Text = Lang.T("Remove program"), Location = new Point(Dpi.X(325), Dpi.X(65)), Size = new Size(Dpi.X(130), Dpi.X(30)) };
             gbSoft.Controls.AddRange(new Control[] { btnProgramAdd, btnProgramRemove });
-            chkLaunchStart = new ClayCheck { Name = "Launch programs when playback starts", Text = Lang.T("Launch programs when playback starts"), Location = new Point(Dpi.X(15), Dpi.X(118)) };
-            chkLaunchEnd = new ClayCheck { Name = "Launch programs when playback ends", Text = Lang.T("Launch programs when playback ends"), Location = new Point(Dpi.X(230), Dpi.X(118)) };
+            chkLaunchStart = new ClayCheck { Name = "Launch on playback start", Text = Lang.T("Launch on playback start"), Location = new Point(Dpi.X(15), Dpi.X(118)) };
+            chkLaunchEnd = new ClayCheck { Name = "Launch on playback end", Text = Lang.T("Launch on playback end"), Location = new Point(Dpi.X(300), Dpi.X(118)) };
             gbSoft.Controls.AddRange(new Control[] { chkLaunchStart, chkLaunchEnd });
             page.Controls.Add(gbSoft);
 
@@ -925,7 +961,6 @@ namespace AutoClickerTool
                 {
                     Location = new Point(Dpi.X(200), Dpi.X(y)),
                     Size = new Size(Dpi.X(170), Dpi.X(26)),
-                    Anchor = AnchorStyles.Top | AnchorStyles.Right,
                     Text = "..."
                 };
                 int idx = i;
@@ -954,17 +989,19 @@ namespace AutoClickerTool
                 Lang.T("Interception - driver-level injection (most thorough, needs driver)")
             });
             cboMethod.SelectedIndex = 0;
-            var methodShell = ClayKit.InputShell(cboMethod, 90, 26, 260);
+            // 英文"Injection method:"较长, 输入框右移到 125 留足间隙
+            var methodShell = ClayKit.InputShell(cboMethod, 125, 26, 250);
             methodShell.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             gbInject.Controls.Add(methodShell);
-            chkScanCode = new ClayCheck { Name = "Keyboard uses scan code injection (experimental, some games only accept scan codes)", Text = Lang.T("Keyboard uses scan code injection (experimental, some games only accept scan codes)"), Location = new Point(Dpi.X(15), Dpi.X(60)) };
-            rbTargetForeground = new ClayRadio { Name = "Target window: foreground", Text = Lang.T("Target window: foreground"), Location = new Point(Dpi.X(15), Dpi.X(88)), Checked = true };
-            rbTargetNamed = new ClayRadio { Name = "Specified title:", Text = Lang.T("Specified title:"), Location = new Point(Dpi.X(130), Dpi.X(88)) };
+            chkScanCode = new ClayCheck { Name = "Keyboard uses scan codes (experimental)", Text = Lang.T("Keyboard uses scan codes (experimental)"), Location = new Point(Dpi.X(15), Dpi.X(60)) };
+            rbTargetForeground = new ClayRadio { Name = "Foreground window", Text = Lang.T("Foreground window"), Location = new Point(Dpi.X(15), Dpi.X(88)), Checked = true };
+            rbTargetNamed = new ClayRadio { Name = "Window by title:", Text = Lang.T("Window by title:"), Location = new Point(Dpi.X(160), Dpi.X(88)) };
             txtTargetWindow = new TextBox { BorderStyle = BorderStyle.None };
-            var targetShell = ClayKit.InputShell(txtTargetWindow, 205, 84, 140);
+            // 英文"Window by title:"较长, 输入框右移到 290 留足间隙
+            var targetShell = ClayKit.InputShell(txtTargetWindow, 290, 84, 100);
             targetShell.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             gbInject.Controls.Add(targetShell);
-            btnGrabWindow = new ClayButton { Name = "Grab window title", Text = Lang.T("Grab window title"), Location = new Point(Dpi.X(355), Dpi.X(84)), Size = new Size(Dpi.X(120), Dpi.X(26)), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            btnGrabWindow = new ClayButton { Name = "Grab window title", Text = Lang.T("Grab window title"), Location = new Point(Dpi.X(400), Dpi.X(84)), Size = new Size(Dpi.X(120), Dpi.X(26)) };
             gbInject.Controls.AddRange(new Control[] { chkScanCode, rbTargetForeground, rbTargetNamed, btnGrabWindow });
             page.Controls.Add(gbInject);
 
@@ -973,12 +1010,13 @@ namespace AutoClickerTool
             chkHumanizeEnabled = new ClayCheck { Name = "Enable humanization", Text = Lang.T("Enable humanization"), Location = new Point(Dpi.X(140), Dpi.X(4)), Checked = true, BackColor = Clay.CardBg };
             chkHumanizeTiming = new ClayCheck { Name = "Randomize interval ±", Text = Lang.T("Randomize interval ±"), Location = new Point(Dpi.X(15), Dpi.X(28)), Checked = true };
             numTimingPct = new ClayNumericUpDown { Minimum = 0, Maximum = 90, Value = 15, BorderStyle = BorderStyle.None };
-            gbHuman.Controls.Add(ClayKit.InputShell(numTimingPct, 155, 24, 55));
-            gbHuman.Controls.Add(Lbl("%", 215, 28));
+            // 英文"Randomize interval ±"较长, 数值框右移到 195
+            gbHuman.Controls.Add(ClayKit.InputShell(numTimingPct, 195, 24, 55));
+            gbHuman.Controls.Add(Lbl("%", 255, 28));
             chkHumanizePos = new ClayCheck { Name = "Fixed position jitter ±", Text = Lang.T("Fixed position jitter ±"), Location = new Point(Dpi.X(15), Dpi.X(54)), Checked = true };
             numPosPx = new ClayNumericUpDown { Minimum = 0, Maximum = 20, Value = 2, BorderStyle = BorderStyle.None };
-            gbHuman.Controls.Add(ClayKit.InputShell(numPosPx, 155, 50, 55));
-            gbHuman.Controls.Add(Lbl("pixels", 215, 54));
+            gbHuman.Controls.Add(ClayKit.InputShell(numPosPx, 195, 50, 55));
+            gbHuman.Controls.Add(Lbl("pixels", 255, 54));
             chkHumanizePress = new ClayCheck { Name = "Random press duration (40~180ms, human-like)", Text = Lang.T("Random press duration (40~180ms, human-like)"), Location = new Point(Dpi.X(15), Dpi.X(80)), Checked = true };
             chkHumanizeTraj = new ClayCheck { Name = "Mouse trajectory (smooth curve instead of teleport)", Text = Lang.T("Mouse trajectory (smooth curve instead of teleport)"), Location = new Point(Dpi.X(15), Dpi.X(106)), Checked = true };
             gbHuman.Controls.AddRange(new Control[] { chkHumanizeEnabled, chkHumanizeTiming, chkHumanizePos, chkHumanizePress, chkHumanizeTraj });
@@ -1015,11 +1053,11 @@ namespace AutoClickerTool
         {
             var gb = Grp("Key Sound Effects", 10, 10, 524, 128);
             chkSfx = new ClayCheck { Name = "Enable key sound effects (new key overrides the playing sound)", Text = Lang.T("Enable key sound effects (new key overrides the playing sound)"), Location = new Point(Dpi.X(15), Dpi.X(28)), Checked = true };
-            // 全局音量滑块
+            // 全局音量滑块(英文"Global volume:"较长, 滑块右移到 120)
             gb.Controls.Add(Lbl("Global volume:", 15, 60));
-            sldGlobalVolume = new ClaySlider { Minimum = 0, Maximum = 100, Value = 100, Location = new Point(Dpi.X(110), Dpi.X(56)), Size = new Size(Dpi.X(150), Dpi.X(22)) };
+            sldGlobalVolume = new ClaySlider { Minimum = 0, Maximum = 100, Value = 100, Location = new Point(Dpi.X(120), Dpi.X(56)), Size = new Size(Dpi.X(150), Dpi.X(22)) };
             gb.Controls.Add(sldGlobalVolume);
-            lblGlobalVol = new Label { Text = "100%", Location = new Point(Dpi.X(268), Dpi.X(60)), AutoSize = true, ForeColor = Clay.Ink, BackColor = Clay.CardBg };
+            lblGlobalVol = new Label { Text = "100%", Location = new Point(Dpi.X(278), Dpi.X(60)), AutoSize = true, ForeColor = Clay.Ink, BackColor = Clay.CardBg };
             gb.Controls.Add(lblGlobalVol);
             btnSfxAdd = new ClayButton { Name = "Add binding", Text = Lang.T("Add binding"), Location = new Point(Dpi.X(15), Dpi.X(88)), Size = new Size(Dpi.X(100), Dpi.X(28)) };
             btnSfxDelete = new ClayButton { Name = "Delete binding", Text = Lang.T("Delete binding"), Location = new Point(Dpi.X(125), Dpi.X(88)), Size = new Size(Dpi.X(105), Dpi.X(28)) };
@@ -1512,6 +1550,14 @@ namespace AutoClickerTool
             _clicker.FixedX = (int)numX.Value;
             _clicker.FixedY = (int)numY.Value;
             _clicker.RepeatCount = (int)numRepeat.Value;
+            string until = chkClickUntil.Checked && txtClickUntil != null ? txtClickUntil.Text.Trim() : "";
+            if (chkClickUntil.Checked && !IsValidTime(until))
+            {
+                SetStatus(Lang.T("Invalid time, use HH:mm format"));
+                return;
+            }
+            _clicker.RunMinutes = (int)numClickMinutes.Value;
+            _clicker.UntilTime = until;
             _clicker.Start();
             Log.Info(string.Format("开始连点: 间隔={0}ms 按键={1} 模式={2} 次数={3}",
                 _clicker.IntervalMs, _clicker.Button, _clicker.FixedPosition ? "固定坐标" : "跟随光标", _clicker.RepeatCount));
@@ -1537,6 +1583,14 @@ namespace AutoClickerTool
             _spammer.IntervalMs = (int)numKeyInterval.Value;
             _spammer.Mode = rbHold.Checked ? KeySpamMode.Hold : KeySpamMode.Tap;
             _spammer.ExtendedKey = InputSimulator.IsExtendedKey(vk);
+            string until = chkSpamUntil.Checked && txtSpamUntil != null ? txtSpamUntil.Text.Trim() : "";
+            if (chkSpamUntil.Checked && !IsValidTime(until))
+            {
+                SetStatus(Lang.T("Invalid time, use HH:mm format"));
+                return;
+            }
+            _spammer.RunMinutes = (int)numSpamMinutes.Value;
+            _spammer.UntilTime = until;
             _spammer.Start();
             Log.Info(string.Format("开始连按: VK=0x{0:X2} 间隔={1}ms 模式={2}", vk, _spammer.IntervalMs, _spammer.Mode));
             UpdateKeyboardUi();
@@ -2371,20 +2425,7 @@ namespace AutoClickerTool
         private void ApplyFrameTheme()
         {
             if (!IsHandleCreated) return;
-            try
-            {
-                int dark = Theme.Current.Dark ? 1 : 0;
-                NativeMethods.DwmSetWindowAttribute(Handle, NativeMethods.DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
-                NativeMethods.DwmSetWindowAttribute(Handle, NativeMethods.DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, ref dark, sizeof(int));
-                int border = ColorTranslator.ToWin32(Theme.Current.WindowBg);
-                NativeMethods.DwmSetWindowAttribute(Handle, NativeMethods.DWMWA_BORDER_COLOR, ref border, sizeof(int));
-                int caption = ColorTranslator.ToWin32(Theme.Current.CardBg);
-                NativeMethods.DwmSetWindowAttribute(Handle, NativeMethods.DWMWA_CAPTION_COLOR, ref caption, sizeof(int));
-            }
-            catch (Exception)
-            {
-                // 旧系统不支持这些属性, 静默忽略
-            }
+            Clay.ApplyFrameTheme(Handle);
         }
 
         protected override void OnHandleCreated(EventArgs e)
@@ -2408,7 +2449,11 @@ namespace AutoClickerTool
                     Dpi.SetS(newDpi);
                     RebuildUiForDpi();
                     var rc = (NativeMethods.RECT)System.Runtime.InteropServices.Marshal.PtrToStructure(m.LParam, typeof(NativeMethods.RECT));
-                    Bounds = new Rectangle(rc.Left, rc.Top, rc.Right - rc.Left, rc.Bottom - rc.Top);
+                    // 位置采用系统建议; 尺寸强制回到设计尺寸(否则系统建议矩形可能与布局宽度不一致,
+                    // 窗口比布局窄一截 → 右侧控件被窗口边缘裁掉/挤出)
+                    int borderW = Width - ClientSize.Width;
+                    int borderH = Height - ClientSize.Height;
+                    Bounds = new Rectangle(rc.Left, rc.Top, Dpi.X(560) + borderW, Dpi.X(530) + borderH);
                     m.Result = IntPtr.Zero;
                     return;
                 }
@@ -2508,6 +2553,9 @@ namespace AutoClickerTool
                 numX.Value = Clamp(cfg.ClickFixedX, 0, 20000);
                 numY.Value = Clamp(cfg.ClickFixedY, 0, 20000);
                 numRepeat.Value = Clamp(cfg.ClickRepeatCount, 0, 100000000);
+                numClickMinutes.Value = Clamp(cfg.ClickMinutes, 0, 99999);
+                chkClickUntil.Checked = !string.IsNullOrEmpty(cfg.ClickUntilTime);
+                if (chkClickUntil.Checked) txtClickUntil.Text = cfg.ClickUntilTime;
 
                 txtKey.Text = cfg.SpamKeyText != null ? cfg.SpamKeyText : "";
                 int keyIdx = _keyOptions.FindIndex(kv => kv.Value == cfg.SpamVk);
@@ -2515,6 +2563,9 @@ namespace AutoClickerTool
                 rbHold.Checked = cfg.SpamHold;
                 rbTap.Checked = !cfg.SpamHold;
                 numKeyInterval.Value = Clamp(cfg.SpamIntervalMs, 1, 3600000);
+                numSpamMinutes.Value = Clamp(cfg.SpamMinutes, 0, 99999);
+                chkSpamUntil.Checked = !string.IsNullOrEmpty(cfg.SpamUntilTime);
+                if (chkSpamUntil.Checked) txtSpamUntil.Text = cfg.SpamUntilTime;
 
                 numSpeed.Value = (decimal)Math.Max((double)numSpeed.Minimum,
                     Math.Min((double)numSpeed.Maximum, cfg.PlaySpeed));
@@ -2637,6 +2688,8 @@ namespace AutoClickerTool
             _cfg.ClickFixedX = (int)numX.Value;
             _cfg.ClickFixedY = (int)numY.Value;
             _cfg.ClickRepeatCount = (int)numRepeat.Value;
+            _cfg.ClickMinutes = (int)numClickMinutes.Value;
+            _cfg.ClickUntilTime = chkClickUntil.Checked ? txtClickUntil.Text.Trim() : "";
 
             string keyText = txtKey.Text == null ? "" : txtKey.Text.Trim();
             if (keyText.Length > 0)
@@ -2652,6 +2705,8 @@ namespace AutoClickerTool
             }
             _cfg.SpamIntervalMs = (int)numKeyInterval.Value;
             _cfg.SpamHold = rbHold.Checked;
+            _cfg.SpamMinutes = (int)numSpamMinutes.Value;
+            _cfg.SpamUntilTime = chkSpamUntil.Checked ? txtSpamUntil.Text.Trim() : "";
 
             _cfg.PlaySpeed = (double)numSpeed.Value;
             _cfg.PlayLoop = chkLoop.Checked;

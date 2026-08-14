@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Threading;
 
 namespace AutoClickerTool
@@ -18,6 +19,22 @@ namespace AutoClickerTool
             if (alive != null && !alive()) return false;
             Thread.Sleep(ms % 10);
             return alive != null ? alive() : true;
+        }
+
+        /// <summary>解析"运行到时刻"(HH:mm)。目标时刻已过(如 22:00 设 03:00)视为次日, 支持过夜挂机。
+        /// 空串/解析失败返回 null(解析失败会打日志)。</summary>
+        public static DateTime? ParseUntilTime(string hhmm)
+        {
+            if (string.IsNullOrEmpty(hhmm)) return null;
+            DateTime until;
+            if (!DateTime.TryParseExact(hhmm, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out until))
+            {
+                Log.Warn("运行到时刻解析失败, 已忽略: " + hhmm);
+                return null;
+            }
+            until = DateTime.Today.Add(until.TimeOfDay);
+            if (until <= DateTime.Now) until = until.AddDays(1);
+            return until;
         }
     }
 }

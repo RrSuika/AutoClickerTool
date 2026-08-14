@@ -173,8 +173,8 @@ namespace AutoClickerTool
             d["Software control"] = "软件控制";
             d["Add program..."] = "添加程序...";
             d["Remove program"] = "移除程序";
-            d["Launch programs when playback starts"] = "回放开始时自动启动程序";
-            d["Launch programs when playback ends"] = "回放结束时自动启动程序";
+            d["Launch on playback start"] = "回放开始时自动启动程序";
+            d["Launch on playback end"] = "回放结束时自动启动程序";
             d["Select a program to launch"] = "选择要自动启动的程序";
             d["Program added: {0}"] = "已添加程序: {0}";
             d["Select a program first"] = "请先选择一个程序";
@@ -267,9 +267,9 @@ namespace AutoClickerTool
             d["SendInput - standard system injection (default)"] = "SendInput - 标准系统注入(默认)";
             d["SendMessage - direct window messages (bypasses injected-flag detection)"] = "SendMessage - 直发窗口消息(绕过注入标记检测)";
             d["Interception - driver-level injection (most thorough, needs driver)"] = "Interception - 驱动级注入(最彻底, 需安装驱动)";
-            d["Keyboard uses scan code injection (experimental, some games only accept scan codes)"] = "键盘使用扫描码注入(实验性, 部分游戏只认扫描码)";
-            d["Target window: foreground"] = "目标窗口: 前台";
-            d["Specified title:"] = "指定标题:";
+            d["Keyboard uses scan codes (experimental)"] = "键盘使用扫描码注入(实验性, 部分游戏只认扫描码)";
+            d["Foreground window"] = "目标窗口: 前台";
+            d["Window by title:"] = "指定标题:";
             d["Grab window title"] = "抓取窗口标题";
             d["Grabbing in 3s..."] = "3 秒后抓取...";
             d["Humanization"] = "拟人化";

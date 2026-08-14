@@ -24,6 +24,8 @@ namespace AutoClickerTool
         public int IntervalMs { get; set; }
         public KeySpamMode Mode { get; set; }
         public bool ExtendedKey { get; set; }
+        public int RunMinutes { get; set; }     // 运行分钟数, 0 = 不限
+        public string UntilTime { get; set; }   // 运行到系统时刻 "HH:mm", 空 = 不限
 
         public void Start()
         {
@@ -60,16 +62,31 @@ namespace AutoClickerTool
 
         private bool Alive(int gen) { return _running && _gen == gen; }
 
+        /// <summary>运行时长/到点停止是否已到期。</summary>
+        private bool TimeUp(DateTime started, DateTime? untilTarget)
+        {
+            if (RunMinutes > 0 && (DateTime.Now - started).TotalMinutes >= RunMinutes) return true;
+            if (untilTarget.HasValue && DateTime.Now >= untilTarget.Value) return true;
+            return false;
+        }
+
         private void Loop(int gen)
         {
             bool held = false;
+            DateTime started = DateTime.Now;
+            DateTime? untilTarget = Util.ParseUntilTime(UntilTime);
             try
             {
                 if (Mode == KeySpamMode.Hold)
                 {
                     InputSimulator.KeyDown(Vk, ExtendedKey);
                     held = true;
-                    while (Alive(gen)) Thread.Sleep(10);
+                    while (Alive(gen))
+                    {
+                        // 运行时长/到点停止(按住模式下按 10ms 粒度检查)
+                        if (TimeUp(started, untilTarget)) break;
+                        Thread.Sleep(10);
+                    }
                 }
                 else
                 {
@@ -80,6 +97,7 @@ namespace AutoClickerTool
                         try { Thread.Sleep(Math.Max(10, Humanizer.NextPressDuration())); }
                         finally { InputSimulator.KeyUp(Vk, ExtendedKey); }
                         if (!Alive(gen)) break;
+                        if (TimeUp(started, untilTarget)) break;
 
                         int sleep = Math.Max(1, Humanizer.NextInterval(IntervalMs));
                         if (!Util.SleepInterruptible(sleep, delegate { return Alive(gen); })) break;
