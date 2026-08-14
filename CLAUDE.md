@@ -35,6 +35,8 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 | [Clay.cs](src/Clay.cs) | **自绘控件库**：`Dpi` 缩放、`Clay` 绘制工具（圆角/阴影/渐变）、`ClayKit.InputShell`、`ClayButton`、`ClayCheck`、`ClayRadio`、`ClayGroup`、`ClayPanel`、`ClayNumericUpDown`（自绘▲▼）、`ClayComboBox`（OwnerDraw 自绘下拉）、`ClaySlider`（主题滑块）、`ClayMenuColorTable`/`ClayMenu`（主题右键菜单） |
 | [Theme.cs](src/Theme.cs) | 6 套主题调色板 + 风格参数（Dark/Glow/Bevel/Radius）。`Theme.Current` 全局单例，控件 OnPaint 实时读取实现换肤 |
 | [Anim.cs](src/Anim.cs) | **轻量动效引擎**：单个全局 Timer(16ms) 驱动，指数平滑逼近目标值（可中断/可重定向，等效可中断的 ease-out transition）；`Anim.To(setValue, current, target, tauMs)`；`EaseOutCubic`/`EaseInOutCubic`；`Anim.Enabled=false` 时全部瞬时（等效 prefers-reduced-motion）。空闲自动停 Timer |
+| [Log.cs](src/Log.cs) | **文件日志**：写 exe 同目录 `log.txt`，`Log.Info/Warn/Error`，线程安全，超 2MB 自动轮转；写失败静默忽略 |
+| [VersionInfo.cs](src/VersionInfo.cs) | **集中版本号**（`Version` 常量）：窗口标题/关于/状态栏/日志/发布脚本共用，改版只改这里 |
 | [Lang.cs](src/Lang.cs) | 双语字典：以**英文原文为 key**，`Lang.T(key)` 按 `Lang.Code`("zh"/"en") 翻译；控件 `Name` 属性存英文原文，语言切换时 `ApplyLangWalk` 按 Name 递归刷新 |
 | [InputSimulator.cs](src/InputSimulator.cs) | **输入注入中枢**：鼠标/键盘事件按 `Method` 路由到 SendInput/SendMessage/InterceptionDriver。MoveTo 内部按拟人化走贝塞尔轨迹；Click 含按下-抬起微拖 |
 | [Humanizer.cs](src/Humanizer.cs) | 拟人化引擎：`Enabled` 总开关 + 间隔(高斯分布+偶发犹豫)/落点(抖动+漂移)/按键时长/轨迹(贝塞尔+Fitts 时长+smoothstep 加减速)四个子开关。**注意内部用 lock 保护共享 Random** |
@@ -140,7 +142,9 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 ## 7. 验证流程
 
 1. 改代码 → `build.bat` 确认编译通过（先关掉正在运行的 AutoClicker.exe）
-2. 启动 `..\AutoClicker.exe` 检查界面/功能；`config.json` 删掉可恢复出厂
-3. **检查多显示器/多 DPI 场景**（本项目用户为混合 DPI 双屏）：窗口在两屏间拖动、改系统缩放，确认界面自动重建且无溢出/模糊
-4. 改动影响热键/录制/回放/音效时，实测一遍完整流程（录制→编辑→保存→加载→回放）
-5. 测试注入工具（PowerShell 等）看到的窗口尺寸是虚拟化的，验证 DPI 要用感知进程或用应用自身日志
+2. 改到纯逻辑模块（`HotkeyManager`/`AppConfig`/`Lang` 等）时 → 跑 [run_tests.bat](tests/run_tests.bat) 单测（编译无 WinForms 依赖的模块成控制台测试 exe 并运行，全绿=通过）
+3. 启动 `..\AutoClicker.exe` 检查界面/功能；`config.json` 删掉可恢复出厂
+4. **检查多显示器/多 DPI 场景**（本项目用户为混合 DPI 双屏）：窗口在两屏间拖动、改系统缩放，确认界面自动重建且无溢出/模糊
+5. 改动影响热键/录制/回放/音效时，实测一遍完整流程（录制→编辑→保存→加载→回放）
+6. 测试注入工具（PowerShell 等）看到的窗口尺寸是虚拟化的，验证 DPI 要用感知进程或用应用自身日志
+7. **发版** → 运行 [publish.bat](publish.bat)（读 [VersionInfo.cs](src/VersionInfo.cs) 的版本号 → 跑单测 → `build.bat` → 打包 `publish\AutoClickerTool-<版本>.zip`，含 exe+README+CHANGELOG+使用说明）。改版只改 `VersionInfo.Version`，打完包 `git tag v<版本>` 并在 [CHANGELOG.md](CHANGELOG.md) 顶部追加条目
