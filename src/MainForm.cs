@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -636,7 +636,7 @@ namespace AutoClickerTool
 
         private void BuildClickerPage(Panel page)
         {
-            var gb = Grp("Click Settings", 10, 10, 524, 148);
+            var gb = Grp("Click Settings", 10, 10, 540, 148);
             // 行1: 间隔 + 鼠标键(英文标签较长, 输入框右移留足间隙)
             gb.Controls.Add(Lbl("Interval (ms):", 15, 33));
             numInterval = new ClayNumericUpDown { Minimum = 1, Maximum = 3600000, Value = 100, BorderStyle = BorderStyle.None };
@@ -680,7 +680,7 @@ namespace AutoClickerTool
 
         private void BuildKeyboardPage(Panel page)
         {
-            var gb = Grp("Key Settings", 10, 10, 524, 158);
+            var gb = Grp("Key Settings", 10, 10, 540, 158);
             gb.Controls.Add(Lbl("Key:", 15, 33));
             cboKey = new ClayComboBox();
             foreach (var kv in _keyOptions) cboKey.Items.Add(kv.Key);
@@ -720,7 +720,7 @@ namespace AutoClickerTool
 
         private void BuildMacroPage(Panel page)
         {
-            var gbRec = Grp("Record / Play", 10, 10, 524, 80);
+            var gbRec = Grp("Record / Play", 10, 10, 540, 80);
             btnRecord = new ClayButton { Name = "Start recording", Text = Lang.T("Start recording"), Location = new Point(Dpi.X(15), Dpi.X(27)), Size = new Size(Dpi.X(115), Dpi.X(36)), Accent = true };
             btnPlay = new ClayButton { Name = "Start playback", Text = Lang.T("Start playback"), Location = new Point(Dpi.X(140), Dpi.X(27)), Size = new Size(Dpi.X(115), Dpi.X(36)), Accent = true };
             btnSave = new ClayButton { Name = "Save Macro", Text = Lang.T("Save Macro"), Location = new Point(Dpi.X(265), Dpi.X(27)), Size = new Size(Dpi.X(85), Dpi.X(36)) };
@@ -729,7 +729,7 @@ namespace AutoClickerTool
             gbRec.Controls.AddRange(new Control[] { btnRecord, btnPlay, btnSave, btnLoad, btnClear });
             page.Controls.Add(gbRec);
 
-            var gbOpt = Grp("Playback Options", 10, 100, 524, 124);
+            var gbOpt = Grp("Playback Options", 10, 100, 540, 124);
             gbOpt.Controls.Add(Lbl("Speed:", 15, 32));
             numSpeed = new ClayNumericUpDown { Minimum = 0.1m, Maximum = 10m, Increment = 0.1m, DecimalPlaces = 1, Value = 1m, BorderStyle = BorderStyle.None };
             gbOpt.Controls.Add(ClayKit.InputShell(numSpeed, 85, 28, 70));
@@ -833,9 +833,9 @@ namespace AutoClickerTool
             };
 
             // 事件编辑按钮
-            btnEditDelay = new ClayButton { Name = "Edit delay", Text = Lang.T("Edit delay"), Location = new Point(Dpi.X(424), Dpi.X(234)), Size = new Size(Dpi.X(110), Dpi.X(30)) };
-            btnAddEvent = new ClayButton { Name = "Add event", Text = Lang.T("Add event"), Location = new Point(Dpi.X(424), Dpi.X(266)), Size = new Size(Dpi.X(110), Dpi.X(30)) };
-            btnDeleteEvent = new ClayButton { Name = "Delete selected", Text = Lang.T("Delete selected"), Location = new Point(Dpi.X(424), Dpi.X(298)), Size = new Size(Dpi.X(110), Dpi.X(30)) };
+            btnEditDelay = new ClayButton { Name = "Edit delay", Text = Lang.T("Edit delay"), Location = new Point(Dpi.X(440), Dpi.X(234)), Size = new Size(Dpi.X(110), Dpi.X(30)) };
+            btnAddEvent = new ClayButton { Name = "Add event", Text = Lang.T("Add event"), Location = new Point(Dpi.X(440), Dpi.X(266)), Size = new Size(Dpi.X(110), Dpi.X(30)) };
+            btnDeleteEvent = new ClayButton { Name = "Delete selected", Text = Lang.T("Delete selected"), Location = new Point(Dpi.X(440), Dpi.X(298)), Size = new Size(Dpi.X(110), Dpi.X(30)) };
             page.Controls.AddRange(new Control[] { btnEditDelay, btnAddEvent, btnDeleteEvent });
 
             lblEventCount = new Label { Text = Lang.F("Events: {0}", 0), Location = new Point(Dpi.X(15), Dpi.X(354)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
@@ -847,7 +847,7 @@ namespace AutoClickerTool
         private void BuildLibraryPage(Panel page)
         {
             // ---- 已存宏列表: 最左侧 ▶ 快速触发, 点击选中后右侧可重命名/副本/删除 ----
-            var gbMacros = Grp("Saved macros", 10, 10, 524, 214);
+            var gbMacros = Grp("Saved macros", 10, 10, 540, 214);
             var shell = new ClayPanel
             {
                 Location = new Point(Dpi.X(10), Dpi.X(28)),
@@ -909,18 +909,18 @@ namespace AutoClickerTool
             };
             lstMacros.DoubleClick += delegate { PlaySelectedMacro(); };
 
-            btnMacroRename = new ClayButton { Name = "Rename", Text = Lang.T("Rename"), Location = new Point(Dpi.X(370), Dpi.X(28)), Size = new Size(Dpi.X(135), Dpi.X(30)) };
-            btnMacroCopy = new ClayButton { Name = "Create a copy", Text = Lang.T("Create a copy"), Location = new Point(Dpi.X(370), Dpi.X(65)), Size = new Size(Dpi.X(135), Dpi.X(30)) };
-            btnMacroDelete = new ClayButton { Name = "Delete macro", Text = Lang.T("Delete macro"), Location = new Point(Dpi.X(370), Dpi.X(102)), Size = new Size(Dpi.X(135), Dpi.X(30)) };
-            var btnMacroRefresh = new ClayButton { Name = "Refresh", Text = Lang.T("Refresh"), Location = new Point(Dpi.X(370), Dpi.X(139)), Size = new Size(Dpi.X(135), Dpi.X(30)) };
-            var btnMacroFolder = new ClayButton { Name = "Open macros folder", Text = Lang.T("Open macros folder"), Location = new Point(Dpi.X(370), Dpi.X(176)), Size = new Size(Dpi.X(135), Dpi.X(30)) };
+            btnMacroRename = new ClayButton { Name = "Rename", Text = Lang.T("Rename"), Location = new Point(Dpi.X(385), Dpi.X(28)), Size = new Size(Dpi.X(135), Dpi.X(30)) };
+            btnMacroCopy = new ClayButton { Name = "Create a copy", Text = Lang.T("Create a copy"), Location = new Point(Dpi.X(385), Dpi.X(65)), Size = new Size(Dpi.X(135), Dpi.X(30)) };
+            btnMacroDelete = new ClayButton { Name = "Delete macro", Text = Lang.T("Delete macro"), Location = new Point(Dpi.X(385), Dpi.X(102)), Size = new Size(Dpi.X(135), Dpi.X(30)) };
+            var btnMacroRefresh = new ClayButton { Name = "Refresh", Text = Lang.T("Refresh"), Location = new Point(Dpi.X(385), Dpi.X(139)), Size = new Size(Dpi.X(135), Dpi.X(30)) };
+            var btnMacroFolder = new ClayButton { Name = "Open macros folder", Text = Lang.T("Open macros folder"), Location = new Point(Dpi.X(385), Dpi.X(176)), Size = new Size(Dpi.X(135), Dpi.X(30)) };
             btnMacroRefresh.Click += delegate { RefreshMacroList(); };
             btnMacroFolder.Click += delegate { OpenMacrosFolder(); };
             gbMacros.Controls.AddRange(new Control[] { btnMacroRename, btnMacroCopy, btnMacroDelete, btnMacroRefresh, btnMacroFolder });
             page.Controls.Add(gbMacros);
 
             // ---- 软件控制: 自动启动程序 ----
-            var gbSoft = Grp("Software control", 10, 234, 524, 150);
+            var gbSoft = Grp("Software control", 10, 234, 540, 150);
             var softShell = new ClayPanel
             {
                 Location = new Point(Dpi.X(10), Dpi.X(28)),
@@ -952,7 +952,7 @@ namespace AutoClickerTool
 
         private void BuildHotkeyPage(Panel page)
         {
-            var gb = Grp("Function hotkeys (click a button, then press the new combo)", 10, 10, 524, 200);
+            var gb = Grp("Function hotkeys (click a button, then press the new combo)", 10, 10, 540, 200);
             string[] names = { Lang.T("Clicker toggle"), Lang.T("Recording toggle"), Lang.T("Playback toggle"), Lang.T("Keyboard toggle"), Lang.T("Stop all") };
             _hkButtons = new Button[names.Length];
             for (int i = 0; i < names.Length; i++)
@@ -982,7 +982,7 @@ namespace AutoClickerTool
         private void BuildAdvancedPage(Panel page)
         {
             // ---- 注入方式 ----
-            var gbInject = Grp("Injection method (switch when a game blocks clicking)", 10, 10, 524, 128);
+            var gbInject = Grp("Injection method (switch when a game blocks clicking)", 10, 10, 540, 128);
             gbInject.Controls.Add(Lbl("Injection method:", 15, 30));
             cboMethod = new ClayComboBox();
             cboMethod.Items.AddRange(new object[]
@@ -1018,7 +1018,7 @@ namespace AutoClickerTool
             page.Controls.Add(gbInject);
 
             // ---- 拟人化(总开关 + 各子项) ----
-            var gbHuman = Grp("Humanization", 10, 148, 524, 132);
+            var gbHuman = Grp("Humanization", 10, 148, 540, 132);
             chkHumanizeEnabled = new ClayCheck { Name = "Enable humanization", Text = Lang.T("Enable humanization"), Location = new Point(Dpi.X(140), Dpi.X(4)), Checked = true, BackColor = Clay.CardBg };
             chkHumanizeTiming = new ClayCheck { Name = "Randomize interval ±", Text = Lang.T("Randomize interval ±"), Location = new Point(Dpi.X(15), Dpi.X(28)), Checked = true };
             numTimingPct = new ClayNumericUpDown { Minimum = 0, Maximum = 90, Value = 15, BorderStyle = BorderStyle.None };
@@ -1035,7 +1035,7 @@ namespace AutoClickerTool
             page.Controls.Add(gbHuman);
 
             // ---- 界面: 语言与主题 / 动效 ----
-            var gbUi = Grp("Interface", 10, 290, 524, 84);
+            var gbUi = Grp("Interface", 10, 290, 540, 84);
             gbUi.Controls.Add(Lbl("Language:", 15, 28));
             cboLanguage = new ClayComboBox();
             cboLanguage.Items.AddRange(new object[] { Lang.T("中文"), Lang.T("English") });
@@ -1051,7 +1051,7 @@ namespace AutoClickerTool
             page.Controls.Add(gbUi);
 
             // ---- 启动与托盘 ----
-            var gbStartup = Grp("Startup", 10, 378, 524, 56);
+            var gbStartup = Grp("Startup", 10, 378, 540, 56);
             chkAutoStart = new ClayCheck { Name = "Start with Windows", Text = Lang.T("Start with Windows"), Location = new Point(Dpi.X(15), Dpi.X(30)) };
             chkSilentStart = new ClayCheck { Name = "Start silently (to tray)", Text = Lang.T("Start silently (to tray)"), Location = new Point(Dpi.X(280), Dpi.X(30)) };
             gbStartup.Controls.AddRange(new Control[] { chkAutoStart, chkSilentStart });
@@ -1063,7 +1063,7 @@ namespace AutoClickerTool
 
         private void BuildSfxPage(Panel page)
         {
-            var gb = Grp("Key Sound Effects", 10, 10, 524, 128);
+            var gb = Grp("Key Sound Effects", 10, 10, 540, 128);
             chkSfx = new ClayCheck { Name = "Enable key sound effects (new key overrides the playing sound)", Text = Lang.T("Enable key sound effects (new key overrides the playing sound)"), Location = new Point(Dpi.X(15), Dpi.X(28)), Checked = true };
             // 全局音量滑块(英文"Global volume:"较长, 滑块右移到 120)
             gb.Controls.Add(Lbl("Global volume:", 15, 60));
