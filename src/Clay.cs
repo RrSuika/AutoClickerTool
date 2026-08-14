@@ -183,6 +183,8 @@ namespace AutoClickerTool
             inner.Location = new Point(Dpi.X(4), Math.Max(0, (shell.Height - inner.Height) / 2));
             inner.BackColor = Theme.Current.InputBg;
             inner.ForeColor = Theme.Current.Ink;
+            // 文字内容居中显示(数字/按键名/时间等)
+            if (inner is TextBox) ((TextBox)inner).TextAlign = HorizontalAlignment.Center;
             shell.Controls.Add(inner);
             return shell;
         }
@@ -690,7 +692,11 @@ namespace AutoClickerTool
                     c.Visible = true;
                     c.BackColor = Theme.Current.InputBg;
                     c.ForeColor = Enabled ? Theme.Current.Ink : Clay.InkSoft;
-                    if (c is TextBox) ((TextBox)c).BorderStyle = BorderStyle.None;
+                    if (c is TextBox)
+                    {
+                        ((TextBox)c).BorderStyle = BorderStyle.None;
+                        ((TextBox)c).TextAlign = HorizontalAlignment.Center; // 数值居中显示
+                    }
                 }
             }
             LayoutEdit();

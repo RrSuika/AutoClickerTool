@@ -28,14 +28,14 @@ namespace AutoClickerTool
             d["Cancel"] = "取消";
             d["About"] = "关于";
 
-            // 标签页
-            d["Mouse Clicking"] = "鼠标连点";
-            d["Keyboard Spam"] = "键盘连按";
-            d["Record & Play"] = "录制回放";
+            // 标签页(英文用短词, 保证 7 个标签在默认窗口宽度下不被压缩截断)
+            d["Clicking"] = "鼠标连点";
+            d["Keys"] = "键盘连按";
+            d["Recorder"] = "录制回放";
             d["Hotkeys"] = "热键";
             d["Advanced"] = "高级设置";
-            d["Sound FX"] = "音效";
-            d["Macro Library"] = "宏库";
+            d["Sound"] = "音效";
+            d["Macros"] = "宏库";
 
             // 顶栏热键提示
             d["Click"] = "连点";
@@ -264,6 +264,8 @@ namespace AutoClickerTool
             // 高级设置页
             d["Injection method (switch when a game blocks clicking)"] = "注入方式(游戏屏蔽自动点击时换用)";
             d["Injection method:"] = "注入方式:";
+            d["Injection methods:\r\n· SendInput - standard system injection (default, most compatible)\r\n· SendMessage - direct window messages (bypasses injected-flag detection; ineffective against Raw Input games)\r\n· Interception - driver-level injection, indistinguishable from real hardware (most thorough; install the driver and put interception.dll next to the exe; unsigned drivers may fail with HVCI)"]
+                = "三种注入方式:\r\n· SendInput - 标准系统注入(默认, 兼容性最好)\r\n· SendMessage - 直发窗口消息(绕过注入标记检测, 对 Raw Input 游戏无效)\r\n· Interception - 驱动级注入, 与真实硬件无异(最彻底; 需安装驱动并把 interception.dll 放到程序目录, 开启 HVCI 时未签名驱动可能无法加载)";
             d["SendInput - standard system injection (default)"] = "SendInput - 标准系统注入(默认)";
             d["SendMessage - direct window messages (bypasses injected-flag detection)"] = "SendMessage - 直发窗口消息(绕过注入标记检测)";
             d["Interception - driver-level injection (most thorough, needs driver)"] = "Interception - 驱动级注入(最彻底, 需安装驱动)";

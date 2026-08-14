@@ -105,6 +105,9 @@ namespace AutoClickerTool
         private Font _tabFontBold;     // 标签条选中/未选中字体缓存(避免每次切页新建 Font)
         private Font _tabFontRegular;
 
+        /// <summary>三种注入方式差异说明("!" 信息按钮悬停文案, 中英双语)。</summary>
+        private const string InjectionInfoText = "Injection methods:\r\n· SendInput - standard system injection (default, most compatible)\r\n· SendMessage - direct window messages (bypasses injected-flag detection; ineffective against Raw Input games)\r\n· Interception - driver-level injection, indistinguishable from real hardware (most thorough; install the driver and put interception.dll next to the exe; unsigned drivers may fail with HVCI)";
+
         // 热键页
         private Button[] _hkButtons;
         private Button btnResetHotkeys;
@@ -417,7 +420,7 @@ namespace AutoClickerTool
         /// <summary>胶囊标签页条。</summary>
         private void BuildTabStrip()
         {
-            string[] tabNames = { Lang.T("Mouse Clicking"), Lang.T("Keyboard Spam"), Lang.T("Record & Play"), Lang.T("Hotkeys"), Lang.T("Advanced"), Lang.T("Sound FX"), Lang.T("Macro Library") };
+            string[] tabNames = { Lang.T("Clicking"), Lang.T("Keys"), Lang.T("Recorder"), Lang.T("Hotkeys"), Lang.T("Advanced"), Lang.T("Sound"), Lang.T("Macros") };
             _tabBtns = new Button[tabNames.Length];
             for (int i = 0; i < tabNames.Length; i++)
             {
@@ -442,7 +445,7 @@ namespace AutoClickerTool
         private void LayoutTabStrip()
         {
             if (_tabBtns == null || _tabBtns.Length == 0) return;
-            string[] names = { Lang.T("Mouse Clicking"), Lang.T("Keyboard Spam"), Lang.T("Record & Play"), Lang.T("Hotkeys"), Lang.T("Advanced"), Lang.T("Sound FX"), Lang.T("Macro Library") };
+            string[] names = { Lang.T("Clicking"), Lang.T("Keys"), Lang.T("Recorder"), Lang.T("Hotkeys"), Lang.T("Advanced"), Lang.T("Sound"), Lang.T("Macros") };
             int n = names.Length;
             int min = Dpi.X(48);
             int avail = _tabStrip.Width - Dpi.X(20);
@@ -646,14 +649,14 @@ namespace AutoClickerTool
             // 行2: 次数 + 运行分钟 + 运行到时刻(新增停止条件)
             gb.Controls.Add(Lbl("Count (0=infinite):", 15, 65));
             numRepeat = new ClayNumericUpDown { Minimum = 0, Maximum = 100000000, Value = 0, BorderStyle = BorderStyle.None };
-            gb.Controls.Add(ClayKit.InputShell(numRepeat, 145, 61, 66));
-            gb.Controls.Add(Lbl("Run minutes:", 245, 65));
+            gb.Controls.Add(ClayKit.InputShell(numRepeat, 140, 61, 60));
+            gb.Controls.Add(Lbl("Run minutes:", 230, 65));
             numClickMinutes = new ClayNumericUpDown { Minimum = 0, Maximum = 99999, Value = 0, BorderStyle = BorderStyle.None };
-            gb.Controls.Add(ClayKit.InputShell(numClickMinutes, 345, 61, 50));
-            gb.Controls.Add(Lbl("Until:", 400, 65));
-            chkClickUntil = new ClayCheck { Location = new Point(Dpi.X(458), Dpi.X(63)) };
+            gb.Controls.Add(ClayKit.InputShell(numClickMinutes, 325, 61, 45));
+            gb.Controls.Add(Lbl("Until:", 375, 65));
+            chkClickUntil = new ClayCheck { Location = new Point(Dpi.X(432), Dpi.X(63)) };
             txtClickUntil = new TextBox { BorderStyle = BorderStyle.None, Text = "23:59", MaxLength = 5, Enabled = false };
-            gb.Controls.Add(ClayKit.InputShell(txtClickUntil, 483, 61, 38));
+            gb.Controls.Add(ClayKit.InputShell(txtClickUntil, 458, 61, 55));
             chkClickUntil.CheckedChanged += delegate { txtClickUntil.Enabled = chkClickUntil.Checked; if (!_applying) SaveSettings(); };
             // 行3: 跟随/固定坐标
             rbFollow = new ClayRadio { Name = "Follow cursor", Text = Lang.T("Follow cursor"), Location = new Point(Dpi.X(15), Dpi.X(97)), Checked = true };
@@ -693,13 +696,13 @@ namespace AutoClickerTool
             gb.Controls.Add(Lbl("Interval (ms):", 15, 101));
             numKeyInterval = new ClayNumericUpDown { Minimum = 1, Maximum = 3600000, Value = 100, BorderStyle = BorderStyle.None };
             gb.Controls.Add(ClayKit.InputShell(numKeyInterval, 110, 97, 80));
-            gb.Controls.Add(Lbl("Run minutes:", 245, 101));
+            gb.Controls.Add(Lbl("Run minutes:", 230, 101));
             numSpamMinutes = new ClayNumericUpDown { Minimum = 0, Maximum = 99999, Value = 0, BorderStyle = BorderStyle.None };
-            gb.Controls.Add(ClayKit.InputShell(numSpamMinutes, 345, 97, 50));
-            gb.Controls.Add(Lbl("Until:", 400, 101));
-            chkSpamUntil = new ClayCheck { Location = new Point(Dpi.X(458), Dpi.X(99)) };
+            gb.Controls.Add(ClayKit.InputShell(numSpamMinutes, 325, 97, 45));
+            gb.Controls.Add(Lbl("Until:", 375, 101));
+            chkSpamUntil = new ClayCheck { Location = new Point(Dpi.X(432), Dpi.X(99)) };
             txtSpamUntil = new TextBox { BorderStyle = BorderStyle.None, Text = "23:59", MaxLength = 5, Enabled = false };
-            gb.Controls.Add(ClayKit.InputShell(txtSpamUntil, 483, 97, 38));
+            gb.Controls.Add(ClayKit.InputShell(txtSpamUntil, 458, 97, 55));
             chkSpamUntil.CheckedChanged += delegate { txtSpamUntil.Enabled = chkSpamUntil.Checked; if (!_applying) SaveSettings(); };
 
             // 行4: 点按/按住(英文文案较长, 各占一行位置)
@@ -721,8 +724,8 @@ namespace AutoClickerTool
             btnRecord = new ClayButton { Name = "Start recording", Text = Lang.T("Start recording"), Location = new Point(Dpi.X(15), Dpi.X(27)), Size = new Size(Dpi.X(115), Dpi.X(36)), Accent = true };
             btnPlay = new ClayButton { Name = "Start playback", Text = Lang.T("Start playback"), Location = new Point(Dpi.X(140), Dpi.X(27)), Size = new Size(Dpi.X(115), Dpi.X(36)), Accent = true };
             btnSave = new ClayButton { Name = "Save Macro", Text = Lang.T("Save Macro"), Location = new Point(Dpi.X(265), Dpi.X(27)), Size = new Size(Dpi.X(85), Dpi.X(36)) };
-            btnLoad = new ClayButton { Name = "Load Macro", Text = Lang.T("Load Macro"), Location = new Point(Dpi.X(360), Dpi.X(27)), Size = new Size(Dpi.X(87), Dpi.X(36)) };
-            btnClear = new ClayButton { Name = "Clear", Text = Lang.T("Clear"), Location = new Point(Dpi.X(457), Dpi.X(27)), Size = new Size(Dpi.X(53), Dpi.X(36)) };
+            btnLoad = new ClayButton { Name = "Load Macro", Text = Lang.T("Load Macro"), Location = new Point(Dpi.X(358), Dpi.X(27)), Size = new Size(Dpi.X(87), Dpi.X(36)) };
+            btnClear = new ClayButton { Name = "Clear", Text = Lang.T("Clear"), Location = new Point(Dpi.X(453), Dpi.X(27)), Size = new Size(Dpi.X(58), Dpi.X(36)) };
             gbRec.Controls.AddRange(new Control[] { btnRecord, btnPlay, btnSave, btnLoad, btnClear });
             page.Controls.Add(gbRec);
 
@@ -830,9 +833,9 @@ namespace AutoClickerTool
             };
 
             // 事件编辑按钮
-            btnEditDelay = new ClayButton { Name = "Edit delay", Text = Lang.T("Edit delay"), Location = new Point(Dpi.X(440), Dpi.X(234)), Size = new Size(Dpi.X(94), Dpi.X(30)), Anchor = AnchorStyles.Top | AnchorStyles.Right };
-            btnAddEvent = new ClayButton { Name = "Add event", Text = Lang.T("Add event"), Location = new Point(Dpi.X(440), Dpi.X(266)), Size = new Size(Dpi.X(94), Dpi.X(30)), Anchor = AnchorStyles.Top | AnchorStyles.Right };
-            btnDeleteEvent = new ClayButton { Name = "Delete selected", Text = Lang.T("Delete selected"), Location = new Point(Dpi.X(424), Dpi.X(298)), Size = new Size(Dpi.X(110), Dpi.X(30)), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            btnEditDelay = new ClayButton { Name = "Edit delay", Text = Lang.T("Edit delay"), Location = new Point(Dpi.X(424), Dpi.X(234)), Size = new Size(Dpi.X(110), Dpi.X(30)) };
+            btnAddEvent = new ClayButton { Name = "Add event", Text = Lang.T("Add event"), Location = new Point(Dpi.X(424), Dpi.X(266)), Size = new Size(Dpi.X(110), Dpi.X(30)) };
+            btnDeleteEvent = new ClayButton { Name = "Delete selected", Text = Lang.T("Delete selected"), Location = new Point(Dpi.X(424), Dpi.X(298)), Size = new Size(Dpi.X(110), Dpi.X(30)) };
             page.Controls.AddRange(new Control[] { btnEditDelay, btnAddEvent, btnDeleteEvent });
 
             lblEventCount = new Label { Text = Lang.F("Events: {0}", 0), Location = new Point(Dpi.X(15), Dpi.X(354)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
@@ -906,11 +909,11 @@ namespace AutoClickerTool
             };
             lstMacros.DoubleClick += delegate { PlaySelectedMacro(); };
 
-            btnMacroRename = new ClayButton { Name = "Rename", Text = Lang.T("Rename"), Location = new Point(Dpi.X(380), Dpi.X(28)), Size = new Size(Dpi.X(140), Dpi.X(30)) };
-            btnMacroCopy = new ClayButton { Name = "Create a copy", Text = Lang.T("Create a copy"), Location = new Point(Dpi.X(380), Dpi.X(65)), Size = new Size(Dpi.X(140), Dpi.X(30)) };
-            btnMacroDelete = new ClayButton { Name = "Delete macro", Text = Lang.T("Delete macro"), Location = new Point(Dpi.X(380), Dpi.X(102)), Size = new Size(Dpi.X(140), Dpi.X(30)) };
-            var btnMacroRefresh = new ClayButton { Name = "Refresh", Text = Lang.T("Refresh"), Location = new Point(Dpi.X(380), Dpi.X(139)), Size = new Size(Dpi.X(140), Dpi.X(30)) };
-            var btnMacroFolder = new ClayButton { Name = "Open macros folder", Text = Lang.T("Open macros folder"), Location = new Point(Dpi.X(380), Dpi.X(176)), Size = new Size(Dpi.X(140), Dpi.X(30)) };
+            btnMacroRename = new ClayButton { Name = "Rename", Text = Lang.T("Rename"), Location = new Point(Dpi.X(370), Dpi.X(28)), Size = new Size(Dpi.X(135), Dpi.X(30)) };
+            btnMacroCopy = new ClayButton { Name = "Create a copy", Text = Lang.T("Create a copy"), Location = new Point(Dpi.X(370), Dpi.X(65)), Size = new Size(Dpi.X(135), Dpi.X(30)) };
+            btnMacroDelete = new ClayButton { Name = "Delete macro", Text = Lang.T("Delete macro"), Location = new Point(Dpi.X(370), Dpi.X(102)), Size = new Size(Dpi.X(135), Dpi.X(30)) };
+            var btnMacroRefresh = new ClayButton { Name = "Refresh", Text = Lang.T("Refresh"), Location = new Point(Dpi.X(370), Dpi.X(139)), Size = new Size(Dpi.X(135), Dpi.X(30)) };
+            var btnMacroFolder = new ClayButton { Name = "Open macros folder", Text = Lang.T("Open macros folder"), Location = new Point(Dpi.X(370), Dpi.X(176)), Size = new Size(Dpi.X(135), Dpi.X(30)) };
             btnMacroRefresh.Click += delegate { RefreshMacroList(); };
             btnMacroFolder.Click += delegate { OpenMacrosFolder(); };
             gbMacros.Controls.AddRange(new Control[] { btnMacroRename, btnMacroCopy, btnMacroDelete, btnMacroRefresh, btnMacroFolder });
@@ -989,19 +992,28 @@ namespace AutoClickerTool
                 Lang.T("Interception - driver-level injection (most thorough, needs driver)")
             });
             cboMethod.SelectedIndex = 0;
-            // 英文"Injection method:"较长, 输入框右移到 125 留足间隙
+            // 英文"Injection method:"较长, 输入框右移到 125 留足间隙;
+            // 固定宽度(不随窗口拉伸, 否则拉大窗口时会向右生长盖住右侧控件)
             var methodShell = ClayKit.InputShell(cboMethod, 125, 26, 250);
-            methodShell.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             gbInject.Controls.Add(methodShell);
+            // 右侧 "!" 信息按钮: 悬停显示三种注入方式的差异说明(下拉选项文字过长, 选中项显示不全时看这里)
+            var btnMethodInfo = new ClayButton
+            {
+                Text = "!",
+                Location = new Point(Dpi.X(382), Dpi.X(26)),
+                Size = new Size(Dpi.X(24), Dpi.X(26)),
+                BackColor = Clay.CardBg
+            };
+            _hintTip.SetToolTip(btnMethodInfo, Lang.T(InjectionInfoText));
+            gbInject.Controls.Add(btnMethodInfo);
             chkScanCode = new ClayCheck { Name = "Keyboard uses scan codes (experimental)", Text = Lang.T("Keyboard uses scan codes (experimental)"), Location = new Point(Dpi.X(15), Dpi.X(60)) };
             rbTargetForeground = new ClayRadio { Name = "Foreground window", Text = Lang.T("Foreground window"), Location = new Point(Dpi.X(15), Dpi.X(88)), Checked = true };
             rbTargetNamed = new ClayRadio { Name = "Window by title:", Text = Lang.T("Window by title:"), Location = new Point(Dpi.X(160), Dpi.X(88)) };
             txtTargetWindow = new TextBox { BorderStyle = BorderStyle.None };
-            // 英文"Window by title:"较长, 输入框右移到 290 留足间隙
-            var targetShell = ClayKit.InputShell(txtTargetWindow, 290, 84, 100);
-            targetShell.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            // 英文"Window by title:"较长, 输入框右移到 288; 固定宽度, 与右侧抓取按钮保持间隙
+            var targetShell = ClayKit.InputShell(txtTargetWindow, 288, 84, 100);
             gbInject.Controls.Add(targetShell);
-            btnGrabWindow = new ClayButton { Name = "Grab window title", Text = Lang.T("Grab window title"), Location = new Point(Dpi.X(400), Dpi.X(84)), Size = new Size(Dpi.X(120), Dpi.X(26)) };
+            btnGrabWindow = new ClayButton { Name = "Grab window title", Text = Lang.T("Grab window title"), Location = new Point(Dpi.X(392), Dpi.X(84)), Size = new Size(Dpi.X(120), Dpi.X(26)) };
             gbInject.Controls.AddRange(new Control[] { chkScanCode, rbTargetForeground, rbTargetNamed, btnGrabWindow });
             page.Controls.Add(gbInject);
 
