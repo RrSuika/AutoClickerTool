@@ -2,9 +2,15 @@
 
 > Windows 鼠标键盘自动化工具 · 纯 C# WinForms · 零第三方依赖 · 单文件绿色运行
 
+**语言 / Language**: [中文](README.md) · [English](README.en.md)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 面向游戏挂机 / 自动点击场景的 Windows 自动化工具。支持鼠标连点、键盘连按、宏录制回放、全局热键、按键音效；内置拟人化引擎与三种输入注入方式（含驱动级），针对"被游戏检测为脚本"的场景做了专门的对抗设计。
+
+## 📸 界面预览
+
+![AutoClickerTool 主界面](docs/screenshots/CN_Screenshot.png)
 
 ## ✨ 功能特性
 
@@ -89,7 +95,7 @@ Alt+鼠标X1         鼠标侧键
 
 | 目录/文件 | 说明 |
 |---|---|
-| [src/MainForm.cs](src/MainForm.cs) | 主界面：6 个标签页、配置加载/保存、DPI 同步、DWM 边框主题 |
+| [src/MainForm.cs](src/MainForm.cs) | 主界面：7 个标签页、配置加载/保存、DPI 同步、DWM 边框主题 |
 | [src/InputSimulator.cs](src/InputSimulator.cs) | 输入注入中枢：SendInput / SendMessage / Interception 路由 |
 | [src/Humanizer.cs](src/Humanizer.cs) | 拟人化引擎 |
 | [src/HotkeyManager.cs](src/HotkeyManager.cs) | 全局热键引擎（低级钩子） |
@@ -116,20 +122,3 @@ Alt+鼠标X1         鼠标侧键
 ## 📄 许可证
 
 [MIT](LICENSE) © 2026 R2S-ver
-
----
-
-## English
-
-A Windows mouse & keyboard automation tool written in pure C# / WinForms with **zero third-party dependencies**.
-
-- Auto-clicker (fixed position / follow cursor / click count limit)
-- Key spammer (tap / hold)
-- Macro record & replay via low-level hooks, with auto-merge of redundant actions, editing, variable speed and looping
-- Fully customizable global hotkeys (multi-key combos, mouse side buttons, media keys)
-- Key sound effects (wav/mp3, cut-off playback)
-- Humanization engine: Gaussian intervals, position jitter & drift, randomized press duration, bezier trajectories
-- Three injection methods: SendInput / SendMessage / Interception (driver-level)
-- 6 themes, Chinese / English UI, per-monitor DPI awareness
-
-Build with `src\build.bat` — only the built-in .NET Framework `csc.exe` is required.

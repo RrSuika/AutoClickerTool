@@ -28,7 +28,12 @@ if (Test-Path $outDir) { Remove-Item $outDir -Recurse -Force }
 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 Copy-Item "AutoClicker.exe" $outDir
 if (Test-Path "README.md") { Copy-Item "README.md" $outDir }
+if (Test-Path "README.en.md") { Copy-Item "README.en.md" $outDir }
 if (Test-Path "docs\CHANGELOG.md") { Copy-Item "docs\CHANGELOG.md" -Destination (Join-Path $outDir "CHANGELOG.md") }
+if (Test-Path "docs\screenshots") {
+    New-Item -ItemType Directory -Path (Join-Path $outDir "docs") -Force | Out-Null
+    Copy-Item "docs\screenshots" -Destination (Join-Path $outDir "docs\screenshots") -Recurse
+}
 Get-ChildItem -Path $root -Filter "*.txt" | Where-Object { $_.Name -ne "log.txt" } | ForEach-Object { Copy-Item $_.FullName $outDir }
 if (Test-Path "interception.dll") { Copy-Item "interception.dll" $outDir }
 
