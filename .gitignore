@@ -1,0 +1,10 @@
+# 构建产物
+AutoClicker.exe
+
+# 运行时状态（删掉 config.json = 恢复出厂设置）
+config.json
+Macros/
+Sounds/
+
+# 开发期验证截图
+src/verify_*.png

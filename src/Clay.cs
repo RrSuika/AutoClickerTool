@@ -1,0 +1,910 @@
+using System;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Windows.Forms;
+
+namespace AutoClickerTool
+{
+    /// <summary>
+    /// DPI 缩放: 布局坐标按 96 DPI 设计, 运行时按实际 DPI 等比放大。
+    /// 进程已声明 DPI 感知(SetProcessDPIAware), 文字本身按物理像素渲染,
+    /// 因此只缩放容器与间距, 不缩放字体 —— 二者等比后布局精确匹配设计稿。
+    /// </summary>
+    internal static class Dpi
+    {
+        public static float S;
+
+        static Dpi()
+        {
+            try
+            {
+                using (var g = Graphics.FromHwnd(IntPtr.Zero))
+                {
+                    S = g.DpiX / 96f;
+                }
+            }
+            catch (Exception)
+            {
+                S = 1f;
+            }
+            if (S < 1f || S > 4f) S = 1f;
+        }
+
+        /// <summary>窗口跨 DPI 显示器移动时(WmDpiChanged)按新 DPI 重置缩放系数。</summary>
+        public static void SetS(float dpi)
+        {
+            S = dpi / 96f;
+            if (S < 1f || S > 4f) S = 1f;
+        }
+
+        public static int X(int v)
+        {
+            return (int)Math.Round(v * S);
+        }
+    }
+
+    /// <summary>
+    /// 自绘控件库(主题驱动)。所有颜色/圆角/阴影从 Theme.Current 读取,
+    /// 切换主题后调用 Invalidate 即完成换肤。
+    /// </summary>
+    internal static class Clay
+    {
+        public static Color WindowBg { get { return Theme.Current.WindowBg; } }
+        public static Color CardBg { get { return Theme.Current.CardBg; } }
+        public static Color Ink { get { return Theme.Current.Ink; } }
+        public static Color InkSoft { get { return Theme.Current.InkSoft; } }
+        public static Color Line { get { return Theme.Current.Line; } }
+        public static Color Run { get { return Theme.Current.Run; } }
+        public static Color Shadow { get { return Theme.Current.Shadow; } }
+
+        /// <summary>圆角矩形路径; 半径超过高度一半时自动收敛为胶囊。</summary>
+        public static GraphicsPath Round(Rectangle r, int radius)
+        {
+            var p = new GraphicsPath();
+            if (r.Width <= 0 || r.Height <= 0) return p;
+            int d = Math.Max(1, Math.Min(radius * 2, Math.Min(r.Width, r.Height)));
+            p.AddArc(r.X, r.Y, d, d, 180, 90);
+            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            p.CloseFigure();
+            return p;
+        }
+
+        /// <summary>
+        /// 阴影: 霓虹主题画光晕(多圈半透明描边), 常规主题画硬偏移阴影。
+        /// bg 为阴影背后的背景色(已填充的四角底色), 用于把半透明阴影预混成不透明色,
+        /// 避免半透明填充在未清空的缓冲上被渲染成黑边。pressed 时阴影收缩, 模拟按压。
+        /// </summary>
+        public static void DrawShadow(Graphics g, Rectangle body, int radius, bool pressed, Color bg)
+        {
+            if (Theme.Current.Glow)
+            {
+                int baseA = Math.Max(18, Theme.Current.Shadow.A / 2);
+                for (int k = 1; k <= 3; k++)
+                {
+                    int a = Math.Max(8, baseA / k);
+                    var gr = Rectangle.Inflate(body, k * 2, k * 2);
+                    using (var gp = Clay.Round(gr, radius + k * 2))
+                    using (var pen = new Pen(Color.FromArgb(a, Theme.Current.Shadow), 2.5f))
+                        g.DrawPath(pen, gp);
+                }
+            }
+            else
+            {
+                // 硬偏移阴影: 直接下移 offset 像素, 并把阴影圆角加大 offset,
+                // 使阴影下沿圆角与按钮下沿圆角在竖直方向上"接上", 消除左下/右下角的竖直线残影;
+                // 不再横向膨胀(膨胀会在按钮四周露出黑色边)。
+                int off = pressed ? 1 : 3;
+                var s = body;
+                s.Offset(0, off);
+                int a = Theme.Current.Shadow.A;
+                Color opaque = Color.FromArgb(
+                    bg.R + (Theme.Current.Shadow.R - bg.R) * a / 255,
+                    bg.G + (Theme.Current.Shadow.G - bg.G) * a / 255,
+                    bg.B + (Theme.Current.Shadow.B - bg.B) * a / 255);
+                using (var sp = Clay.Round(s, radius + off))
+                using (var sb = new SolidBrush(opaque))
+                    g.FillPath(sb, sp);
+            }
+        }
+
+        /// <summary>主题渐变刷: 拟物主题用三阶(顶部高光→基色→底部暗), 其余用双色渐变。</summary>
+        public static LinearGradientBrush Gradient(Rectangle r, Color top, Color bottom)
+        {
+            if (Theme.Current.Bevel)
+            {
+                var cb = new ColorBlend(3);
+                cb.Positions = new float[] { 0f, 0.45f, 1f };
+                cb.Colors = new Color[] { Theme.Lighten(top, 45), top, Theme.Darken(bottom, 22) };
+                return new LinearGradientBrush(r, Color.Black, Color.White, LinearGradientMode.Vertical)
+                {
+                    InterpolationColors = cb
+                };
+            }
+            return new LinearGradientBrush(r, top, bottom, LinearGradientMode.Vertical);
+        }
+
+        /// <summary>顶部内高光描边。</summary>
+        public static void DrawTopLight(Graphics g, Rectangle body, int radius, int alpha)
+        {
+            using (var gp = Clay.Round(Rectangle.Inflate(body, -1, -1), Math.Max(1, radius - 1)))
+            using (var pen = new Pen(Color.FromArgb(alpha, 255, 255, 255), 1f))
+                g.DrawPath(pen, gp);
+        }
+    }
+
+    /// <summary>静态构建工具: 输入控件外壳等。</summary>
+    internal static class ClayKit
+    {
+        /// <summary>把输入控件包进圆角内凹外壳(NumericUpDown / ComboBox / TextBox)。坐标按 96 DPI 传入, 内部自动缩放。</summary>
+        public static ClayPanel InputShell(Control inner, int x, int y, int w)
+        {
+            var shell = new ClayPanel
+            {
+                Location = new Point(Dpi.X(x), Dpi.X(y)),
+                Size = new Size(Dpi.X(w), Dpi.X(26)),
+                CornerRadius = 0, // 0 = 由主题决定
+                Inset = true,
+                BackColor = Theme.Current.InputBg
+            };
+            if (inner is ComboBox)
+                ((ComboBox)inner).ItemHeight = Dpi.X(15);
+            inner.Width = Dpi.X(w) - 2 * Dpi.X(4);
+            inner.Height = Math.Max(inner.Height, Dpi.X(19));
+            inner.Location = new Point(Dpi.X(4), Math.Max(0, (shell.Height - inner.Height) / 2));
+            inner.BackColor = Theme.Current.InputBg;
+            inner.ForeColor = Theme.Current.Ink;
+            shell.Controls.Add(inner);
+            return shell;
+        }
+    }
+
+    /// <summary>主题按钮: 渐变圆角 + 阴影/光晕 + 顶部内高光 + 按压回弹。</summary>
+    internal class ClayButton : Button
+    {
+        public bool Accent;   // 主渐变
+        public bool Danger;   // 停止态
+        public bool Mint;     // 薄荷
+        public bool Tab;      // 标签页胶囊模式
+        public bool Selected; // 标签页选中
+
+        private bool _hover;
+        private bool _pressed;
+
+        public ClayButton()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            FlatStyle = FlatStyle.Flat;
+            FlatAppearance.BorderSize = 0;
+            ForeColor = Clay.Ink;
+            BackColor = Clay.CardBg;
+        }
+
+        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { _hover = false; _pressed = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseDown(MouseEventArgs e) { _pressed = true; Invalidate(); base.OnMouseDown(e); }
+        protected override void OnMouseUp(MouseEventArgs e) { _pressed = false; Invalidate(); base.OnMouseUp(e); }
+        protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
+
+        private bool Highlighted { get { return Selected || Accent || Danger || Mint; } }
+
+        private Color TopColor()
+        {
+            if (!Enabled) return Theme.Blend(Theme.Current.CreamTop, Theme.Current.CardBg, 0.5f);
+            if (Selected || Accent) return _hover ? Theme.Lighten(Theme.Current.AccentTop, 18) : Theme.Current.AccentTop;
+            if (Danger) return _hover ? Theme.Lighten(Theme.Current.DangerTop, 18) : Theme.Current.DangerTop;
+            if (Mint) return _hover ? Theme.Lighten(Theme.Current.MintTop, 18) : Theme.Current.MintTop;
+            return _hover ? Theme.Lighten(Theme.Current.CreamTop, 12) : Theme.Current.CreamTop;
+        }
+
+        private Color BottomColor()
+        {
+            if (!Enabled) return Theme.Blend(Theme.Current.CreamBottom, Theme.Current.CardBg, 0.5f);
+            if (Selected || Accent) return _hover ? Theme.Lighten(Theme.Current.AccentBottom, 18) : Theme.Current.AccentBottom;
+            if (Danger) return _hover ? Theme.Lighten(Theme.Current.DangerBottom, 18) : Theme.Current.DangerBottom;
+            if (Mint) return _hover ? Theme.Lighten(Theme.Current.MintBottom, 18) : Theme.Current.MintBottom;
+            return _hover ? Theme.Lighten(Theme.Current.CreamBottom, 12) : Theme.Current.CreamBottom;
+        }
+
+        protected override void OnPaint(PaintEventArgs pe)
+        {
+            var g = pe.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            // 先填满整个矩形背景, 避免圆角外的四角露出未初始化像素。
+            // 用父容器背景色而非 BackColor: 否则按钮(默认 CardBg)放在页面(WindowBg)上时
+            // 四角会露出近白色方块, 形成"白色方形边框"。
+            Color squareBg = Tab ? Clay.WindowBg : (Parent != null ? Parent.BackColor : BackColor);
+            using (var br = new SolidBrush(squareBg))
+                g.FillRectangle(br, ClientRectangle);
+
+            var body = new Rectangle(0, 0, Width - 1, Height - 4);
+            if (Tab)
+            {
+                if (!Selected && _hover)
+                {
+                    using (var bp = Clay.Round(new Rectangle(0, 0, Width - 1, Height - 3), Dpi.X(Theme.Current.Radius)))
+                    using (var br = new SolidBrush(Theme.Current.TabHot))
+                        g.FillPath(br, bp);
+                }
+            }
+
+            int r = Math.Min(Height - 4, Dpi.X(Theme.Current.Radius));
+            if ((Tab && !Selected) || !Highlighted)
+            {
+                // 无阴影的扁平按钮(次级/未选中标签)
+                using (var bp = Clay.Round(body, r))
+                {
+                    using (var br = Clay.Gradient(body, TopColor(), BottomColor()))
+                        g.FillPath(br, bp);
+                    Clay.DrawTopLight(g, body, r, 120);
+                }
+            }
+            else
+            {
+                // 有阴影/光晕的实体按钮(主按钮/选中标签)
+                if (_pressed) body.Offset(0, 1);
+                Clay.DrawShadow(g, body, r, _pressed, squareBg);
+                using (var bp = Clay.Round(body, r))
+                {
+                    using (var br = Clay.Gradient(body, TopColor(), BottomColor()))
+                        g.FillPath(br, bp);
+                    Clay.DrawTopLight(g, body, r, 140);
+                    if (_hover && !_pressed)
+                    {
+                        using (var br = new SolidBrush(Color.FromArgb(28, 255, 255, 255)))
+                            g.FillPath(br, bp);
+                    }
+                }
+            }
+
+            // 文字
+            TextRenderer.DrawText(g, Text, Font, body, Enabled ? ForeColor : Clay.InkSoft,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+
+            // 焦点虚线环
+            if (Focused && ShowFocusCues)
+            {
+                using (var p = Clay.Round(Rectangle.Inflate(body, -4, -4), Math.Max(1, r - 4)))
+                using (var pen = new Pen(Clay.Line) { DashStyle = DashStyle.Dash })
+                    g.DrawPath(pen, p);
+            }
+        }
+    }
+
+    /// <summary>主题复选框: 圆角方块 + 渐变勾选态。</summary>
+    internal class ClayCheck : CheckBox
+    {
+        private bool _hover;
+
+        public ClayCheck()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            AutoSize = true;
+            ForeColor = Clay.Ink;
+            BackColor = Clay.CardBg;
+        }
+
+        public override Size GetPreferredSize(Size proposedSize)
+        {
+            var sz = TextRenderer.MeasureText(Text, Font);
+            return new Size(22 + 4 + sz.Width + 2, Math.Max(18, sz.Height));
+        }
+
+        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnCheckedChanged(EventArgs e) { Invalidate(); base.OnCheckedChanged(e); }
+        protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
+
+        protected override void OnPaint(PaintEventArgs pe)
+        {
+            var g = pe.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var br = new SolidBrush(Parent != null ? Parent.BackColor : BackColor))
+                g.FillRectangle(br, ClientRectangle);
+            var box = new Rectangle(0, (Height - 17) / 2, 17, 17);
+            int r = Math.Min(6, Math.Max(2, Theme.Current.Radius / 2));
+            using (var bp = Clay.Round(box, r))
+            {
+                if (Checked)
+                {
+                    using (var br = Clay.Gradient(box, Theme.Current.AccentTop, Theme.Current.AccentBottom))
+                        g.FillPath(br, bp);
+                    using (var pen = new Pen(Color.White, 2f)
+                    {
+                        StartCap = LineCap.Round,
+                        EndCap = LineCap.Round,
+                        LineJoin = LineJoin.Round
+                    })
+                    {
+                        g.DrawLine(pen, box.X + 4, box.Y + 9, box.X + 7, box.Y + 12);
+                        g.DrawLine(pen, box.X + 7, box.Y + 12, box.X + 13, box.Y + 5);
+                    }
+                }
+                else
+                {
+                    using (var br = new SolidBrush(_hover ? Theme.Lighten(Theme.Current.CheckBg, 12) : Theme.Current.CheckBg))
+                        g.FillPath(br, bp);
+                    using (var pen = new Pen(Clay.Line, 1.5f))
+                        g.DrawPath(pen, bp);
+                }
+            }
+            var tr = new Rectangle(23, 0, Width - 23, Height);
+            TextRenderer.DrawText(g, Text, Font, tr, Enabled ? ForeColor : Clay.InkSoft,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
+    }
+
+    /// <summary>主题单选框: 圆形 + 渐变内芯。</summary>
+    internal class ClayRadio : RadioButton
+    {
+        private bool _hover;
+
+        public ClayRadio()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            AutoSize = true;
+            ForeColor = Clay.Ink;
+            BackColor = Clay.CardBg;
+        }
+
+        public override Size GetPreferredSize(Size proposedSize)
+        {
+            var sz = TextRenderer.MeasureText(Text, Font);
+            return new Size(20 + 4 + sz.Width + 2, Math.Max(18, sz.Height));
+        }
+
+        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnCheckedChanged(EventArgs e) { Invalidate(); base.OnCheckedChanged(e); }
+        protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
+
+        protected override void OnPaint(PaintEventArgs pe)
+        {
+            var g = pe.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var br = new SolidBrush(Parent != null ? Parent.BackColor : BackColor))
+                g.FillRectangle(br, ClientRectangle);
+            var ring = new Rectangle(0, (Height - 17) / 2, 17, 17);
+            using (var br = new SolidBrush(_hover ? Theme.Lighten(Theme.Current.CheckBg, 12) : Theme.Current.CheckBg))
+                g.FillEllipse(br, ring);
+            using (var pen = new Pen(Clay.Line, 1.5f))
+                g.DrawEllipse(pen, ring);
+            if (Checked)
+            {
+                var core = Rectangle.Inflate(ring, -5, -5);
+                using (var br = Clay.Gradient(core, Theme.Current.AccentTop, Theme.Current.AccentBottom))
+                    g.FillEllipse(br, core);
+            }
+            var tr = new Rectangle(22, 0, Width - 22, Height);
+            TextRenderer.DrawText(g, Text, Font, tr, Enabled ? ForeColor : Clay.InkSoft,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
+    }
+
+    /// <summary>主题分组卡片: 圆角卡 + 阴影/光晕 + 顶部内高光。</summary>
+    internal class ClayGroup : GroupBox
+    {
+        public ClayGroup()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = Clay.CardBg;
+        }
+
+        protected override void OnPaint(PaintEventArgs pe)
+        {
+            var g = pe.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            // 四角用父容器背景色填充, 使卡片真正呈现圆角(而非露出近白色方块)
+            using (var br = new SolidBrush(Parent != null ? Parent.BackColor : BackColor))
+                g.FillRectangle(br, ClientRectangle);
+            var body = new Rectangle(0, 0, Width - 1, Height - 4);
+            int r = Math.Min(Dpi.X(Theme.Current.Radius), body.Height / 2);
+            Clay.DrawShadow(g, body, r, false, Parent != null ? Parent.BackColor : BackColor);
+            using (var bp = Clay.Round(body, r))
+            {
+                using (var br = new SolidBrush(Clay.CardBg))
+                    g.FillPath(br, bp);
+                Clay.DrawTopLight(g, body, r, 130);
+            }
+            if (!string.IsNullOrEmpty(Text))
+            {
+                using (var f = new Font(Font, FontStyle.Bold))
+                    TextRenderer.DrawText(g, Text, f, new Rectangle(Dpi.X(16), Dpi.X(7), Width - Dpi.X(32), Dpi.X(20)), Clay.InkSoft,
+                        TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.EndEllipsis);
+            }
+        }
+    }
+
+    /// <summary>主题卡片面板: 圆角卡片或内凹输入壳。CornerRadius = 0 时由主题决定。</summary>
+    internal class ClayPanel : Panel
+    {
+        public int CornerRadius = 0; // 0 = 由主题决定
+        public bool Inset;           // true = 内凹(输入壳), false = 卡片
+
+        public ClayPanel()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = Clay.CardBg;
+        }
+
+        protected override void OnPaint(PaintEventArgs pe)
+        {
+            var g = pe.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            // 四角用父容器背景色填充, 让圆角卡片/内凹壳与所在容器自然融合
+            using (var br = new SolidBrush(Parent != null ? Parent.BackColor : BackColor))
+                g.FillRectangle(br, ClientRectangle);
+            int r = CornerRadius > 0 ? CornerRadius
+                : (Inset ? Dpi.X(Math.Max(2, Theme.Current.Radius / 2)) : Dpi.X(Theme.Current.Radius));
+            if (Inset)
+            {
+                var body = new Rectangle(0, 0, Width - 1, Height - 1);
+                using (var bp = Clay.Round(body, r))
+                {
+                    using (var br = new SolidBrush(BackColor))
+                        g.FillPath(br, bp);
+                    // 内凹: 顶部深色细线
+                    using (var gp = Clay.Round(Rectangle.Inflate(body, -1, -1), Math.Max(1, r - 1)))
+                    using (var pen = new Pen(Color.FromArgb(70, Clay.Line), 1f))
+                        g.DrawPath(pen, gp);
+                }
+            }
+            else
+            {
+                var body = new Rectangle(0, 0, Width - 1, Height - 4);
+                Clay.DrawShadow(g, body, r, false, Parent != null ? Parent.BackColor : BackColor);
+                using (var bp = Clay.Round(body, r))
+                {
+                    using (var br = new SolidBrush(BackColor))
+                        g.FillPath(br, bp);
+                    Clay.DrawTopLight(g, body, r, 130);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// 主题数值输入框: 自绘替换系统原生上下箭头(原生白色箭头与主题不搭)。
+    /// 隐藏内部 UpDown 按钮控件, 右侧自绘 ▲▼ 区域, 点击/滚轮/键盘上下键均可调整。
+    /// </summary>
+    internal class ClayNumericUpDown : NumericUpDown
+    {
+        private const int BtnW = 13;      // 右侧 ▲▼ 区宽度(设计单位, 内部 Dpi 缩放)
+        private const int RepeatDelay = 450; // 按住后首次连发前的延迟(ms), 避免单击误跳 2 格
+        private const int RepeatRate = 60;   // 长按连发间隔(ms)
+        private readonly Timer _repeatTimer;
+        private bool _hoverUp;
+        private bool _hoverDown;
+        private bool _pressUp;
+        private bool _pressDown;
+
+        public ClayNumericUpDown()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BorderStyle = BorderStyle.None;
+            BackColor = Theme.Current.InputBg;
+            ForeColor = Theme.Current.Ink;
+            _repeatTimer = new Timer { Interval = RepeatDelay };
+            _repeatTimer.Tick += delegate
+            {
+                // 按住 ▲▼ 持续增减(首次点击立即生效, 后续按 RepeatRate 连发)
+                if (_pressUp && _hoverUp) UpButton();
+                else if (_pressDown && _hoverDown) DownButton();
+                else { _repeatTimer.Stop(); return; }
+                _repeatTimer.Interval = RepeatRate;
+            };
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            // 隐藏内部编辑框与系统 UpDown 箭头按钮(按类型判断, 子控件顺序因框架版本而异):
+            // 不隐藏的话系统按钮会拦截右侧 ▲▼ 区域的鼠标点击, 与自绘箭头冲突
+            foreach (Control c in Controls)
+            {
+                string t = c.GetType().Name;
+                if (t == "UpDownButtons" || t == "UpDownEdit") c.Visible = false;
+            }
+        }
+
+        protected override void OnValueChanged(EventArgs e)
+        {
+            Invalidate();
+            base.OnValueChanged(e);
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            bool up = e.X >= Width - Dpi.X(BtnW) && e.Y < Height / 2;
+            bool dn = e.X >= Width - Dpi.X(BtnW) && e.Y >= Height / 2;
+            if (up != _hoverUp || dn != _hoverDown)
+            {
+                _hoverUp = up;
+                _hoverDown = dn;
+                Invalidate();
+            }
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _hoverUp = _hoverDown = _pressUp = _pressDown = false;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left && e.X >= Width - Dpi.X(BtnW))
+            {
+                if (e.Y < Height / 2)
+                {
+                    _pressUp = true;
+                    UpButton();
+                }
+                else
+                {
+                    _pressDown = true;
+                    DownButton();
+                }
+                _repeatTimer.Interval = RepeatDelay; // 每次按下都从长延迟开始, 保证单击只 +1
+                _repeatTimer.Start();
+                Invalidate();
+                return; // 不调 base: 避免系统文本选择行为
+            }
+            Focus();
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            _pressUp = _pressDown = false;
+            _repeatTimer.Stop();
+            Invalidate();
+            base.OnMouseUp(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs pe)
+        {
+            var g = pe.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var br = new SolidBrush(Theme.Current.InputBg))
+                g.FillRectangle(br, ClientRectangle);
+
+            // 数值文本(直接画内部编辑框的当前文本, 支持输入中的中间状态)
+            var tr = new Rectangle(Dpi.X(5), 0, Width - Dpi.X(BtnW) - Dpi.X(10), Height);
+            TextRenderer.DrawText(g, Text, Font, tr, Enabled ? Theme.Current.Ink : Clay.InkSoft,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+
+            // 右侧 ▲▼ 区: 分隔线 + 悬停高亮 + 主题色三角
+            int x0 = Width - Dpi.X(BtnW);
+            using (var pen = new Pen(Color.FromArgb(70, Clay.Line), 1f))
+                g.DrawLine(pen, x0, Dpi.X(3), x0, Height - Dpi.X(3) - 1);
+
+            if (Enabled && (_hoverUp || _hoverDown))
+            {
+                var zone = new Rectangle(x0 + Dpi.X(1), (_hoverUp ? 0 : Height / 2) + Dpi.X(1),
+                    Dpi.X(BtnW) - Dpi.X(2), Height / 2 - Dpi.X(2));
+                using (var gp = Clay.Round(zone, Dpi.X(4)))
+                using (var br = new SolidBrush(Color.FromArgb(46, Theme.Current.AccentTop)))
+                    g.FillPath(br, gp);
+            }
+
+            // 主题强调色箭头(浅色主题向墨色微混以保证可读性)
+            float k = Theme.Current.Dark ? 0f : 0.42f;
+            Color arrowBase = Enabled ? Theme.Blend(Theme.Current.AccentBottom, Theme.Current.Ink, k) : Clay.InkSoft;
+            Color arrowHot = Enabled ? Theme.Current.AccentBottom : Clay.InkSoft;
+            int cx = x0 + Dpi.X(BtnW) / 2;
+            DrawArrow(g, arrowBase, arrowHot, _hoverUp, _pressUp && _hoverUp, cx, Height / 2 - Dpi.X(3), true);
+            DrawArrow(g, arrowBase, arrowHot, _hoverDown, _pressDown && _hoverDown, cx, Height / 2 + Dpi.X(3), false);
+
+            // 焦点下划线
+            if (Focused && ShowFocusCues)
+            {
+                using (var pen = new Pen(Theme.Current.AccentTop, 1.5f))
+                    g.DrawLine(pen, Dpi.X(2), Height - 1, Width - Dpi.X(2), Height - 1);
+            }
+        }
+
+        private void DrawArrow(Graphics g, Color baseCol, Color hotCol, bool hovered, bool pressed, int cx, int cy, bool up)
+        {
+            Color c;
+            if (!Enabled) c = Clay.InkSoft;
+            else if (pressed) c = Theme.Lighten(hotCol, 30);
+            else if (hovered) c = hotCol;
+            else c = baseCol;
+            using (var br = new SolidBrush(c))
+            {
+                var pts = up
+                    ? new[] { new Point(cx - Dpi.X(4), cy + Dpi.X(3)), new Point(cx + Dpi.X(4), cy + Dpi.X(3)), new Point(cx, cy - Dpi.X(3)) }
+                    : new[] { new Point(cx - Dpi.X(4), cy - Dpi.X(3)), new Point(cx + Dpi.X(4), cy - Dpi.X(3)), new Point(cx, cy + Dpi.X(3)) };
+                g.FillPolygon(br, pts);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 主题下拉框: OwnerDraw 自绘静态区(背景/文本/主题箭头)与下拉列表项,
+    /// 替换系统原生白色下拉箭头与白底列表。仅用于 DropDownList 样式。
+    /// </summary>
+    internal class ClayComboBox : ComboBox
+    {
+        private IntPtr _listBrush = IntPtr.Zero; // GDI 背景刷(下拉列表窗口)
+        private bool _hover;
+        private bool _dropped;
+
+        public ClayComboBox()
+        {
+            DrawMode = DrawMode.OwnerDrawFixed;
+            DropDownStyle = ComboBoxStyle.DropDownList;
+            FlatStyle = FlatStyle.Flat;
+            IntegralHeight = false;
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = Theme.Current.InputBg;
+            ForeColor = Theme.Current.Ink;
+            ItemHeight = Dpi.X(20);
+            MaxDropDownItems = 9;
+        }
+
+        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnDropDown(EventArgs e)
+        {
+            _dropped = true;
+            RecreateListBrush();
+            // 下拉高度贴合条目数, 避免底部露出系统白底
+            DropDownHeight = Math.Min(Items.Count, MaxDropDownItems) * ItemHeight + 4;
+            Invalidate();
+            base.OnDropDown(e);
+        }
+        protected override void OnDropDownClosed(EventArgs e) { _dropped = false; Invalidate(); base.OnDropDownClosed(e); }
+        protected override void OnSelectedIndexChanged(EventArgs e) { Invalidate(); base.OnSelectedIndexChanged(e); }
+        protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
+
+        private void RecreateListBrush()
+        {
+            if (_listBrush != IntPtr.Zero) NativeMethods.DeleteObject(_listBrush);
+            _listBrush = NativeMethods.CreateSolidBrush(ColorTranslator.ToWin32(Theme.Current.InputBg));
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (_listBrush != IntPtr.Zero) NativeMethods.DeleteObject(_listBrush);
+            _listBrush = IntPtr.Zero;
+            base.Dispose(disposing);
+        }
+
+        /// <summary>下拉列表窗口背景/文字颜色(WM_CTLCOLORLISTBOX)。</summary>
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == 0x0134) // WM_CTLCOLORLISTBOX
+            {
+                if (_listBrush == IntPtr.Zero) RecreateListBrush();
+                NativeMethods.SetBkColor(m.WParam, ColorTranslator.ToWin32(Theme.Current.InputBg));
+                NativeMethods.SetTextColor(m.WParam, ColorTranslator.ToWin32(Theme.Current.Ink));
+                m.Result = _listBrush;
+                return;
+            }
+            base.WndProc(ref m);
+        }
+
+        protected override void OnPaint(PaintEventArgs pe)
+        {
+            var g = pe.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var br = new SolidBrush(Enabled ? Theme.Current.InputBg : Theme.Blend(Theme.Current.InputBg, Clay.CardBg, 0.5f)))
+                g.FillRectangle(br, ClientRectangle);
+
+            // 选中项文本
+            var tr = new Rectangle(Dpi.X(5), 0, Width - Dpi.X(20), Height);
+            TextRenderer.DrawText(g, Text, Font, tr, Enabled ? Theme.Current.Ink : Clay.InkSoft,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+
+            // 右侧下拉箭头: 主题色小三角, 展开时翻转
+            int cx = Width - Dpi.X(11);
+            int cy = Height / 2;
+            using (var arrow = new SolidBrush(_hover || _dropped ? Theme.Current.AccentBottom : Clay.InkSoft))
+            {
+                var pts = _dropped
+                    ? new[] { new Point(cx - Dpi.X(4), cy - Dpi.X(2)), new Point(cx + Dpi.X(4), cy - Dpi.X(2)), new Point(cx, cy + Dpi.X(3)) }
+                    : new[] { new Point(cx - Dpi.X(4), cy - Dpi.X(3)), new Point(cx + Dpi.X(4), cy - Dpi.X(3)), new Point(cx, cy + Dpi.X(2)) };
+                g.FillPolygon(arrow, pts);
+            }
+
+            // 焦点下划线
+            if (Focused && ShowFocusCues)
+            {
+                using (var pen = new Pen(Theme.Current.AccentTop, 1.5f))
+                    g.DrawLine(pen, Dpi.X(2), Height - 1, Width - Dpi.X(2), Height - 1);
+            }
+        }
+
+        protected override void OnDrawItem(DrawItemEventArgs e)
+        {
+            e.DrawBackground();
+            if (e.Index < 0 || e.Index >= Items.Count) return;
+            bool sel = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+            using (var br = new SolidBrush(sel ? Theme.Blend(Theme.Current.AccentTop, Theme.Current.InputBg, 0.65f) : Theme.Current.InputBg))
+                e.Graphics.FillRectangle(br, e.Bounds);
+            TextRenderer.DrawText(e.Graphics, GetItemText(Items[e.Index]), Font,
+                new Rectangle(e.Bounds.X + Dpi.X(5), e.Bounds.Y, e.Bounds.Width - Dpi.X(10), e.Bounds.Height),
+                sel ? Theme.Current.Ink : Clay.Ink,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
+    }
+
+    /// <summary>
+    /// 主题滑块: 圆角轨道 + 主题渐变已填充段 + 圆形拇指。点击/拖动调整, 值域 Minimum~Maximum。
+    /// 用于音量等 0~100 调节, 与主题一致(不用系统原生 TrackBar)。
+    /// </summary>
+    internal class ClaySlider : Control
+    {
+        private int _value;
+        private bool _drag;
+        private bool _hover;
+
+        public event EventHandler ValueChanged;
+
+        public int Minimum = 0;
+        public int Maximum = 100;
+
+        public int Value
+        {
+            get { return _value; }
+            set
+            {
+                int v = Clamp(value);
+                if (v != _value)
+                {
+                    _value = v;
+                    Invalidate();
+                }
+            }
+        }
+
+        public ClaySlider()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = Clay.CardBg;
+            _value = 100;
+        }
+
+        private int Clamp(int v)
+        {
+            int lo = Math.Min(Minimum, Maximum);
+            int hi = Math.Max(Minimum, Maximum);
+            return Math.Max(lo, Math.Min(hi, v));
+        }
+
+        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { _hover = false; _drag = false; Invalidate(); base.OnMouseLeave(e); }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                _drag = true;
+                UpdateFromX(e.X);
+            }
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            if (_drag) UpdateFromX(e.X);
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            if (_drag) { _drag = false; UpdateFromX(e.X); }
+            base.OnMouseUp(e);
+        }
+
+        private void UpdateFromX(int x)
+        {
+            int pad = Dpi.X(7);
+            int innerW = Width - pad * 2;
+            float frac = innerW > 0 ? (float)(x - pad) / innerW : 0f;
+            frac = Math.Max(0f, Math.Min(1f, frac));
+            int v = (int)Math.Round(Minimum + (Maximum - Minimum) * frac);
+            if (v != _value)
+            {
+                _value = v;
+                Invalidate();
+                if (ValueChanged != null) ValueChanged(this, EventArgs.Empty);
+            }
+        }
+
+        protected override void OnPaint(PaintEventArgs pe)
+        {
+            var g = pe.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var br = new SolidBrush(Parent != null ? Parent.BackColor : BackColor))
+                g.FillRectangle(br, ClientRectangle);
+
+            int pad = Dpi.X(7);
+            int trackH = Dpi.X(4);
+            int cy = Height / 2;
+            var track = new Rectangle(pad, cy - trackH / 2, Width - pad * 2, trackH);
+            using (var bp = Clay.Round(track, trackH / 2))
+            using (var br = new SolidBrush(Enabled ? Theme.Current.Line : Clay.InkSoft))
+                g.FillPath(br, bp);
+
+            float frac = Maximum > Minimum ? (float)(_value - Minimum) / (Maximum - Minimum) : 0f;
+            int fillW = (int)((Width - pad * 2) * frac);
+            if (fillW > trackH)
+            {
+                var fill = new Rectangle(pad, cy - trackH / 2, fillW, trackH);
+                using (var bp = Clay.Round(fill, trackH / 2))
+                using (var br = Clay.Gradient(fill, Theme.Current.AccentTop, Theme.Current.AccentBottom))
+                    g.FillPath(br, bp);
+            }
+
+            int cx = pad + fillW;
+            int r = Dpi.X(_hover || _drag ? 8 : 7);
+            var thumb = new Rectangle(cx - r, cy - r, r * 2, r * 2);
+            using (var br = new SolidBrush(Enabled ? Theme.Current.AccentBottom : Clay.InkSoft))
+                g.FillEllipse(br, thumb);
+            using (var pen = new Pen(Color.FromArgb(150, 255, 255, 255), 1.5f))
+                g.DrawEllipse(pen, thumb);
+        }
+    }
+
+    /// <summary>主题右键菜单配色表: 背景/高亮/分隔线全部跟随 Theme.Current。</summary>
+    internal class ClayMenuColorTable : ProfessionalColorTable
+    {
+        public override Color ToolStripDropDownBackground { get { return Theme.Current.CardBg; } }
+        public override Color MenuBorder { get { return Clay.Line; } }
+        public override Color MenuItemBorder { get { return Clay.Line; } }
+        public override Color MenuItemSelected { get { return Theme.Blend(Theme.Current.AccentTop, Theme.Current.CardBg, 0.45f); } }
+        public override Color MenuItemSelectedGradientBegin { get { return Theme.Blend(Theme.Current.AccentTop, Theme.Current.CardBg, 0.45f); } }
+        public override Color MenuItemSelectedGradientEnd { get { return Theme.Blend(Theme.Current.AccentBottom, Theme.Current.CardBg, 0.45f); } }
+        public override Color MenuItemPressedGradientBegin { get { return Theme.Blend(Theme.Current.AccentBottom, Theme.Current.CardBg, 0.6f); } }
+        public override Color MenuItemPressedGradientEnd { get { return Theme.Blend(Theme.Current.AccentBottom, Theme.Current.CardBg, 0.6f); } }
+        public override Color ImageMarginGradientBegin { get { return Theme.Current.CardBg; } }
+        public override Color ImageMarginGradientMiddle { get { return Theme.Current.CardBg; } }
+        public override Color ImageMarginGradientEnd { get { return Theme.Current.CardBg; } }
+        public override Color SeparatorDark { get { return Clay.Line; } }
+        public override Color SeparatorLight { get { return Clay.Line; } }
+    }
+
+    /// <summary>构建主题化右键菜单, 文字色跟随主题(切换主题后仍实时取色)。</summary>
+    internal static class ClayMenu
+    {
+        public static ContextMenuStrip Build()
+        {
+            var menu = new ContextMenuStrip
+            {
+                Renderer = new ToolStripProfessionalRenderer(new ClayMenuColorTable()),
+                BackColor = Clay.CardBg,
+                ForeColor = Clay.Ink,
+                ShowImageMargin = false
+            };
+            // 打开前刷新文字色, 保证主题切换后菜单文字仍可读
+            menu.Opening += delegate
+            {
+                menu.ForeColor = Clay.Ink;
+                foreach (ToolStripItem it in menu.Items) it.ForeColor = Clay.Ink;
+            };
+            return menu;
+        }
+
+        public static ToolStripMenuItem Item(ContextMenuStrip owner, string en)
+        {
+            var it = new ToolStripMenuItem(Lang.T(en)) { Name = en };
+            owner.Items.Add(it);
+            return it;
+        }
+    }
+}
