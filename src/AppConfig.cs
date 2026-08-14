@@ -12,8 +12,11 @@ namespace AutoClickerTool
     /// </summary>
     internal class AppConfig
     {
-        /// <summary>配置结构版本号: 未来改字段时据此做迁移, 避免旧配置静默错乱。</summary>
-        public int ConfigVersion = 3;
+        /// <summary>配置结构版本号: 未来改字段时据此做迁移, 避免旧配置静默错乱。0=旧配置缺字段, 加载后迁移到 CurrentVersion。</summary>
+        public int ConfigVersion = 0;
+
+        /// <summary>当前配置结构版本。新增字段并需要迁移时 +1, 并在 Migrate() 里按版本补齐。</summary>
+        private const int CurrentVersion = 3;
 
         // ---- 功能热键 ----
         public string ClickerHotkey = "F6";
@@ -123,24 +126,33 @@ namespace AutoClickerTool
             error = null;
             try
             {
-                if (!File.Exists(FilePath)) return new AppConfig();
+                if (!File.Exists(FilePath)) return Default();
                 var ser = new JavaScriptSerializer();
                 var cfg = ser.Deserialize<AppConfig>(File.ReadAllText(FilePath, Encoding.UTF8));
-                if (cfg == null) return new AppConfig();
+                if (cfg == null) return Default();
                 Migrate(cfg);
                 return cfg;
             }
             catch (Exception ex)
             {
                 error = ex.Message;
-                return new AppConfig();
+                return Default();
             }
+        }
+
+        /// <summary>全新配置(首次启动/配置损坏): 直接标记为当前版本, 不再走迁移。</summary>
+        private static AppConfig Default()
+        {
+            var c = new AppConfig();
+            c.ConfigVersion = CurrentVersion;
+            return c;
         }
 
         /// <summary>按 ConfigVersion 做增量迁移(旧版本存档加载时逐步升级到当前结构)。</summary>
         private static void Migrate(AppConfig cfg)
         {
-            // 当前版本为 3; 未来新增字段时在这里按 cfg.ConfigVersion 补齐, 最后设为最新版本号
+            // 未来新增字段时在这里按 cfg.ConfigVersion 补齐, 最后设为 CurrentVersion。
+            // 注意: ConfigVersion 默认 0, 因此"ConfigVersion 字段出现之前的旧存档"会走完整迁移链。
             if (cfg.ConfigVersion < 2)
             {
                 // 例如: cfg.SpamKeyText = ""; 之类
@@ -152,7 +164,7 @@ namespace AutoClickerTool
                 // 老配置保留其显式保存的值(无法区分"用户手动关闭"与"旧默认 false", 故不强制覆盖)。
                 Log.Warn(string.Format("配置从版本 {0} 迁移到 {1}", cfg.ConfigVersion, 3));
             }
-            cfg.ConfigVersion = 3;
+            cfg.ConfigVersion = CurrentVersion;
         }
 
         public void Save()
