@@ -14,13 +14,14 @@ namespace AutoClickerTool
     /// </summary>
     internal static class Humanizer
     {
-        public static bool Enabled = true;              // 总开关
-        public static bool TimingEnabled = true;        // 间隔随机化开关
+        // 开关由 UI 线程写、引擎线程读, 用 volatile 保证可见性(布尔读写本身原子)
+        public static volatile bool Enabled = true;              // 总开关
+        public static volatile bool TimingEnabled = true;        // 间隔随机化开关
         public static int TimingJitterPct = 15;         // 间隔 ±N%
-        public static bool PositionEnabled = true;      // 固定坐标抖动开关
+        public static volatile bool PositionEnabled = true;      // 固定坐标抖动开关
         public static int PositionJitterPx = 2;         // ±N 像素
-        public static bool PressDurationEnabled = true; // 按键时长随机化开关
-        public static bool TrajectoryEnabled = true;    // 移动轨迹开关(关闭则瞬移)
+        public static volatile bool PressDurationEnabled = true; // 按键时长随机化开关
+        public static volatile bool TrajectoryEnabled = true;    // 移动轨迹开关(关闭则瞬移)
 
         private static readonly Random Rnd = new Random();
         private static readonly object Lock = new object();

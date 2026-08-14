@@ -75,18 +75,21 @@ namespace AutoClickerTool
         /// 阴影: 霓虹主题画光晕(多圈半透明描边), 常规主题画硬偏移阴影。
         /// bg 为阴影背后的背景色(已填充的四角底色), 用于把半透明阴影预混成不透明色,
         /// 避免半透明填充在未清空的缓冲上被渲染成黑边。pressed 时阴影收缩, 模拟按压。
+        /// off: 硬阴影下移像素数(默认 3; 按压动画可传 1~3 实现平滑收缩)。
         /// </summary>
-        public static void DrawShadow(Graphics g, Rectangle body, int radius, bool pressed, Color bg)
+        public static void DrawShadow(Graphics g, Rectangle body, int radius, bool pressed, Color bg, float off = 3f)
         {
             if (Theme.Current.Glow)
             {
+                // 霓虹光晕: 多圈半透明描边; 描边颜色按 bg 预混成不透明色,
+                // 避免半透明填充在未清空的缓冲上被渲染成黑边(首次显示黑边、重绘后消失)。
                 int baseA = Math.Max(18, Theme.Current.Shadow.A / 2);
                 for (int k = 1; k <= 3; k++)
                 {
                     int a = Math.Max(8, baseA / k);
                     var gr = Rectangle.Inflate(body, k * 2, k * 2);
                     using (var gp = Clay.Round(gr, radius + k * 2))
-                    using (var pen = new Pen(Color.FromArgb(a, Theme.Current.Shadow), 2.5f))
+                    using (var pen = new Pen(Premix(bg, Theme.Current.Shadow, a), 2.5f))
                         g.DrawPath(pen, gp);
                 }
             }
@@ -95,18 +98,22 @@ namespace AutoClickerTool
                 // 硬偏移阴影: 直接下移 offset 像素, 并把阴影圆角加大 offset,
                 // 使阴影下沿圆角与按钮下沿圆角在竖直方向上"接上", 消除左下/右下角的竖直线残影;
                 // 不再横向膨胀(膨胀会在按钮四周露出黑色边)。
-                int off = pressed ? 1 : 3;
+                float o = pressed ? Math.Min(off, 1.5f) : off;
                 var s = body;
-                s.Offset(0, off);
-                int a = Theme.Current.Shadow.A;
-                Color opaque = Color.FromArgb(
-                    bg.R + (Theme.Current.Shadow.R - bg.R) * a / 255,
-                    bg.G + (Theme.Current.Shadow.G - bg.G) * a / 255,
-                    bg.B + (Theme.Current.Shadow.B - bg.B) * a / 255);
-                using (var sp = Clay.Round(s, radius + off))
-                using (var sb = new SolidBrush(opaque))
+                s.Offset(0, (int)Math.Round(o));
+                using (var sp = Clay.Round(s, radius + (int)Math.Round(o)))
+                using (var sb = new SolidBrush(Premix(bg, Theme.Current.Shadow, Theme.Current.Shadow.A)))
                     g.FillPath(sb, sp);
             }
+        }
+
+        /// <summary>把半透明前景色按 alpha 与背景色预混成不透明色(视觉与 alpha 混合一致, 但不受缓冲残留影响)。</summary>
+        private static Color Premix(Color bg, Color fg, int alpha)
+        {
+            return Color.FromArgb(
+                bg.R + (fg.R - bg.R) * alpha / 255,
+                bg.G + (fg.G - bg.G) * alpha / 255,
+                bg.B + (fg.B - bg.B) * alpha / 255);
         }
 
         /// <summary>主题渐变刷: 拟物主题用三阶(顶部高光→基色→底部暗), 其余用双色渐变。</summary>
@@ -160,17 +167,29 @@ namespace AutoClickerTool
         }
     }
 
-    /// <summary>主题按钮: 渐变圆角 + 阴影/光晕 + 顶部内高光 + 按压回弹。</summary>
+    /// <summary>主题按钮: 渐变圆角 + 阴影/光晕 + 顶部内高光 + 按压回弹。
+    /// 悬停/按压/焦点环/标签选中均走 Anim 指数平滑, 视觉上"快起慢收"(ease-out), 可中断不跳变。</summary>
     internal class ClayButton : Button
     {
         public bool Accent;   // 主渐变
         public bool Danger;   // 停止态
         public bool Mint;     // 薄荷
         public bool Tab;      // 标签页胶囊模式
-        public bool Selected; // 标签页选中
+        public bool Selected; // 标签页选中(逻辑态; 视觉过渡看 _selT)
 
         private bool _hover;
         private bool _pressed;
+
+        // 动效进度 0~1
+        private float _hoverT;
+        private float _pressT;
+        private float _focusT;
+        private float _selT = 1f;
+
+        private readonly Action<float> _animHover;
+        private readonly Action<float> _animPress;
+        private readonly Action<float> _animFocus;
+        private readonly Action<float> _animSel;
 
         public ClayButton()
         {
@@ -180,32 +199,72 @@ namespace AutoClickerTool
             FlatAppearance.BorderSize = 0;
             ForeColor = Clay.Ink;
             BackColor = Clay.CardBg;
+            _animHover = v => { _hoverT = v; Invalidate(); };
+            _animPress = v => { _pressT = v; Invalidate(); };
+            _animFocus = v => { _focusT = v; Invalidate(); };
+            _animSel = v => { _selT = v; Invalidate(); };
+            if (Selected) _selT = 1f;
         }
 
-        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { _hover = false; _pressed = false; Invalidate(); base.OnMouseLeave(e); }
-        protected override void OnMouseDown(MouseEventArgs e) { _pressed = true; Invalidate(); base.OnMouseDown(e); }
-        protected override void OnMouseUp(MouseEventArgs e) { _pressed = false; Invalidate(); base.OnMouseUp(e); }
+        /// <summary>标签页切换时设置选中目标值(触发平滑过渡); 非 Tab 按钮忽略。</summary>
+        public void SetSelectionT(float target)
+        {
+            if (!Tab) return;
+            Anim.To(_animSel, _selT, target, 120f);
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            _hover = true;
+            Anim.To(_animHover, _hoverT, 1f, 70f); // 进入快(及时反馈)
+            base.OnMouseEnter(e);
+        }
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _hover = false;
+            _pressed = false;
+            Anim.To(_animHover, _hoverT, 0f, 100f);
+            Anim.To(_animPress, _pressT, 0f, 90f);
+            base.OnMouseLeave(e);
+        }
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            _pressed = true;
+            Anim.To(_animPress, _pressT, 1f, 50f); // 按下反馈要快
+            base.OnMouseDown(e);
+        }
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            _pressed = false;
+            Anim.To(_animPress, _pressT, 0f, 100f); // 松开略缓, 自然回弹
+            base.OnMouseUp(e);
+        }
+        protected override void OnGotFocus(EventArgs e) { Anim.To(_animFocus, _focusT, 1f, 100f); base.OnGotFocus(e); }
+        protected override void OnLostFocus(EventArgs e) { Anim.To(_animFocus, _focusT, 0f, 100f); base.OnLostFocus(e); }
         protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
 
         private bool Highlighted { get { return Selected || Accent || Danger || Mint; } }
 
-        private Color TopColor()
+        private Color TopColor(bool sel)
         {
             if (!Enabled) return Theme.Blend(Theme.Current.CreamTop, Theme.Current.CardBg, 0.5f);
-            if (Selected || Accent) return _hover ? Theme.Lighten(Theme.Current.AccentTop, 18) : Theme.Current.AccentTop;
-            if (Danger) return _hover ? Theme.Lighten(Theme.Current.DangerTop, 18) : Theme.Current.DangerTop;
-            if (Mint) return _hover ? Theme.Lighten(Theme.Current.MintTop, 18) : Theme.Current.MintTop;
-            return _hover ? Theme.Lighten(Theme.Current.CreamTop, 12) : Theme.Current.CreamTop;
+            Color baseC, hoverC;
+            if (sel || Accent) { baseC = Theme.Current.AccentTop; hoverC = Theme.Lighten(baseC, 18); }
+            else if (Danger) { baseC = Theme.Current.DangerTop; hoverC = Theme.Lighten(baseC, 18); }
+            else if (Mint) { baseC = Theme.Current.MintTop; hoverC = Theme.Lighten(baseC, 18); }
+            else { baseC = Theme.Current.CreamTop; hoverC = Theme.Lighten(baseC, 12); }
+            return Theme.Blend(baseC, hoverC, Anim.EaseOutCubic(_hoverT));
         }
 
-        private Color BottomColor()
+        private Color BottomColor(bool sel)
         {
             if (!Enabled) return Theme.Blend(Theme.Current.CreamBottom, Theme.Current.CardBg, 0.5f);
-            if (Selected || Accent) return _hover ? Theme.Lighten(Theme.Current.AccentBottom, 18) : Theme.Current.AccentBottom;
-            if (Danger) return _hover ? Theme.Lighten(Theme.Current.DangerBottom, 18) : Theme.Current.DangerBottom;
-            if (Mint) return _hover ? Theme.Lighten(Theme.Current.MintBottom, 18) : Theme.Current.MintBottom;
-            return _hover ? Theme.Lighten(Theme.Current.CreamBottom, 12) : Theme.Current.CreamBottom;
+            Color baseC, hoverC;
+            if (sel || Accent) { baseC = Theme.Current.AccentBottom; hoverC = Theme.Lighten(baseC, 18); }
+            else if (Danger) { baseC = Theme.Current.DangerBottom; hoverC = Theme.Lighten(baseC, 18); }
+            else if (Mint) { baseC = Theme.Current.MintBottom; hoverC = Theme.Lighten(baseC, 18); }
+            else { baseC = Theme.Current.CreamBottom; hoverC = Theme.Lighten(baseC, 12); }
+            return Theme.Blend(baseC, hoverC, Anim.EaseOutCubic(_hoverT));
         }
 
         protected override void OnPaint(PaintEventArgs pe)
@@ -220,41 +279,63 @@ namespace AutoClickerTool
             using (var br = new SolidBrush(squareBg))
                 g.FillRectangle(br, ClientRectangle);
 
+            float hv = Anim.EaseOutCubic(_hoverT);
+            float pv = Anim.EaseOutCubic(_pressT);
+
             var body = new Rectangle(0, 0, Width - 1, Height - 4);
             if (Tab)
             {
-                if (!Selected && _hover)
+                // 未选中标签的悬停暖底(淡入)
+                if (_selT < 0.99f && _hover)
                 {
                     using (var bp = Clay.Round(new Rectangle(0, 0, Width - 1, Height - 3), Dpi.X(Theme.Current.Radius)))
-                    using (var br = new SolidBrush(Theme.Current.TabHot))
+                    using (var br = new SolidBrush(Theme.Blend(squareBg, Theme.Current.TabHot, hv * 0.7f)))
                         g.FillPath(br, bp);
                 }
             }
 
             int r = Math.Min(Height - 4, Dpi.X(Theme.Current.Radius));
-            if ((Tab && !Selected) || !Highlighted)
+
+            // 标签选中交叉过渡: 颜色在"未选中(奶油)"与"选中(强调)"间按 _selT 插值(ease-in-out)
+            float selT = 1f;
+            bool shadowed = Highlighted;
+            if (Tab)
+            {
+                selT = Anim.EaseInOutCubic(_selT);
+                shadowed = selT > 0.5f;
+            }
+            Color top = Tab ? Theme.Blend(TopColor(false), TopColor(true), selT) : TopColor(Selected);
+            Color bot = Tab ? Theme.Blend(BottomColor(false), BottomColor(true), selT) : BottomColor(Selected);
+
+            if (!shadowed)
             {
                 // 无阴影的扁平按钮(次级/未选中标签)
                 using (var bp = Clay.Round(body, r))
                 {
-                    using (var br = Clay.Gradient(body, TopColor(), BottomColor()))
+                    using (var br = Clay.Gradient(body, top, bot))
                         g.FillPath(br, bp);
                     Clay.DrawTopLight(g, body, r, 120);
                 }
             }
             else
             {
-                // 有阴影/光晕的实体按钮(主按钮/选中标签)
-                if (_pressed) body.Offset(0, 1);
-                Clay.DrawShadow(g, body, r, _pressed, squareBg);
+                // 有阴影/光晕的实体按钮(主按钮/选中标签); 按压 = 下沉 + 阴影收缩 + 轻微变暗
+                int sink = (int)Math.Round(pv);                 // 按压下沉 1px
+                int shrink = (int)Math.Round(2f * pv);          // 整体内收 2px(模拟按压缩小)
+                if (sink > 0 || shrink > 0) body = Rectangle.Inflate(body, -shrink, -shrink);
+                if (sink > 0) body.Offset(0, sink);
+                float off = 3f - 2f * pv;                       // 阴影从 3px 收窄到 1px
+                Clay.DrawShadow(g, body, r, pv > 0.5f, squareBg, off);
                 using (var bp = Clay.Round(body, r))
                 {
-                    using (var br = Clay.Gradient(body, TopColor(), BottomColor()))
+                    Color pt = Theme.Blend(top, Theme.Darken(top, 8), pv);
+                    Color pb = Theme.Blend(bot, Theme.Darken(bot, 8), pv);
+                    using (var br = Clay.Gradient(body, pt, pb))
                         g.FillPath(br, bp);
                     Clay.DrawTopLight(g, body, r, 140);
                     if (_hover && !_pressed)
                     {
-                        using (var br = new SolidBrush(Color.FromArgb(28, 255, 255, 255)))
+                        using (var br = new SolidBrush(Color.FromArgb((int)(28 * hv), 255, 255, 255)))
                             g.FillPath(br, bp);
                     }
                 }
@@ -264,20 +345,28 @@ namespace AutoClickerTool
             TextRenderer.DrawText(g, Text, Font, body, Enabled ? ForeColor : Clay.InkSoft,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
 
-            // 焦点虚线环
+            // 焦点虚线环(淡入淡出)
             if (Focused && ShowFocusCues)
             {
-                using (var p = Clay.Round(Rectangle.Inflate(body, -4, -4), Math.Max(1, r - 4)))
-                using (var pen = new Pen(Clay.Line) { DashStyle = DashStyle.Dash })
-                    g.DrawPath(pen, p);
+                int fa = (int)(200 * Anim.EaseOutCubic(_focusT));
+                if (fa > 4)
+                {
+                    using (var p = Clay.Round(Rectangle.Inflate(body, -4, -4), Math.Max(1, r - 4)))
+                    using (var pen = new Pen(Color.FromArgb(fa, Clay.Line)) { DashStyle = DashStyle.Dash })
+                        g.DrawPath(pen, p);
+                }
             }
         }
     }
 
-    /// <summary>主题复选框: 圆角方块 + 渐变勾选态。</summary>
+    /// <summary>主题复选框: 圆角方块 + 渐变勾选态。悬停底色与勾选对勾淡入淡出。</summary>
     internal class ClayCheck : CheckBox
     {
-        private bool _hover;
+        private float _hoverT;
+        private float _checkT;
+
+        private readonly Action<float> _animHover;
+        private readonly Action<float> _animCheck;
 
         public ClayCheck()
         {
@@ -286,6 +375,9 @@ namespace AutoClickerTool
             AutoSize = true;
             ForeColor = Clay.Ink;
             BackColor = Clay.CardBg;
+            _animHover = v => { _hoverT = v; Invalidate(); };
+            _animCheck = v => { _checkT = v; Invalidate(); };
+            _checkT = Checked ? 1f : 0f;
         }
 
         public override Size GetPreferredSize(Size proposedSize)
@@ -294,9 +386,9 @@ namespace AutoClickerTool
             return new Size(22 + 4 + sz.Width + 2, Math.Max(18, sz.Height));
         }
 
-        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
-        protected override void OnCheckedChanged(EventArgs e) { Invalidate(); base.OnCheckedChanged(e); }
+        protected override void OnMouseEnter(EventArgs e) { Anim.To(_animHover, _hoverT, 1f, 70f); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { Anim.To(_animHover, _hoverT, 0f, 100f); base.OnMouseLeave(e); }
+        protected override void OnCheckedChanged(EventArgs e) { Anim.To(_animCheck, _checkT, Checked ? 1f : 0f, 110f); base.OnCheckedChanged(e); }
         protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
 
         protected override void OnPaint(PaintEventArgs pe)
@@ -305,6 +397,8 @@ namespace AutoClickerTool
             g.SmoothingMode = SmoothingMode.AntiAlias;
             using (var br = new SolidBrush(Parent != null ? Parent.BackColor : BackColor))
                 g.FillRectangle(br, ClientRectangle);
+            float hv = Anim.EaseOutCubic(_hoverT);
+            float cv = Anim.EaseOutCubic(_checkT);
             var box = new Rectangle(0, (Height - 17) / 2, 17, 17);
             int r = Math.Min(6, Math.Max(2, Theme.Current.Radius / 2));
             using (var bp = Clay.Round(box, r))
@@ -313,20 +407,24 @@ namespace AutoClickerTool
                 {
                     using (var br = Clay.Gradient(box, Theme.Current.AccentTop, Theme.Current.AccentBottom))
                         g.FillPath(br, bp);
-                    using (var pen = new Pen(Color.White, 2f)
+                    if (cv > 0.05f)
                     {
-                        StartCap = LineCap.Round,
-                        EndCap = LineCap.Round,
-                        LineJoin = LineJoin.Round
-                    })
-                    {
-                        g.DrawLine(pen, box.X + 4, box.Y + 9, box.X + 7, box.Y + 12);
-                        g.DrawLine(pen, box.X + 7, box.Y + 12, box.X + 13, box.Y + 5);
+                        using (var pen = new Pen(Color.FromArgb((int)(255 * cv), 255, 255, 255), 2f)
+                        {
+                            StartCap = LineCap.Round,
+                            EndCap = LineCap.Round,
+                            LineJoin = LineJoin.Round
+                        })
+                        {
+                            g.DrawLine(pen, box.X + 4, box.Y + 9, box.X + 7, box.Y + 12);
+                            g.DrawLine(pen, box.X + 7, box.Y + 12, box.X + 13, box.Y + 5);
+                        }
                     }
                 }
                 else
                 {
-                    using (var br = new SolidBrush(_hover ? Theme.Lighten(Theme.Current.CheckBg, 12) : Theme.Current.CheckBg))
+                    Color bg = Theme.Blend(Theme.Current.CheckBg, Theme.Lighten(Theme.Current.CheckBg, 12), hv);
+                    using (var br = new SolidBrush(bg))
                         g.FillPath(br, bp);
                     using (var pen = new Pen(Clay.Line, 1.5f))
                         g.DrawPath(pen, bp);
@@ -338,10 +436,14 @@ namespace AutoClickerTool
         }
     }
 
-    /// <summary>主题单选框: 圆形 + 渐变内芯。</summary>
+    /// <summary>主题单选框: 圆形 + 渐变内芯。悬停底色与选中内芯淡入淡出。</summary>
     internal class ClayRadio : RadioButton
     {
-        private bool _hover;
+        private float _hoverT;
+        private float _checkT;
+
+        private readonly Action<float> _animHover;
+        private readonly Action<float> _animCheck;
 
         public ClayRadio()
         {
@@ -350,6 +452,9 @@ namespace AutoClickerTool
             AutoSize = true;
             ForeColor = Clay.Ink;
             BackColor = Clay.CardBg;
+            _animHover = v => { _hoverT = v; Invalidate(); };
+            _animCheck = v => { _checkT = v; Invalidate(); };
+            _checkT = Checked ? 1f : 0f;
         }
 
         public override Size GetPreferredSize(Size proposedSize)
@@ -358,9 +463,9 @@ namespace AutoClickerTool
             return new Size(20 + 4 + sz.Width + 2, Math.Max(18, sz.Height));
         }
 
-        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
-        protected override void OnCheckedChanged(EventArgs e) { Invalidate(); base.OnCheckedChanged(e); }
+        protected override void OnMouseEnter(EventArgs e) { Anim.To(_animHover, _hoverT, 1f, 70f); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { Anim.To(_animHover, _hoverT, 0f, 100f); base.OnMouseLeave(e); }
+        protected override void OnCheckedChanged(EventArgs e) { Anim.To(_animCheck, _checkT, Checked ? 1f : 0f, 110f); base.OnCheckedChanged(e); }
         protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
 
         protected override void OnPaint(PaintEventArgs pe)
@@ -369,15 +474,18 @@ namespace AutoClickerTool
             g.SmoothingMode = SmoothingMode.AntiAlias;
             using (var br = new SolidBrush(Parent != null ? Parent.BackColor : BackColor))
                 g.FillRectangle(br, ClientRectangle);
+            float hv = Anim.EaseOutCubic(_hoverT);
+            float cv = Anim.EaseOutCubic(_checkT);
             var ring = new Rectangle(0, (Height - 17) / 2, 17, 17);
-            using (var br = new SolidBrush(_hover ? Theme.Lighten(Theme.Current.CheckBg, 12) : Theme.Current.CheckBg))
+            Color bg = Theme.Blend(Theme.Current.CheckBg, Theme.Lighten(Theme.Current.CheckBg, 12), hv);
+            using (var br = new SolidBrush(bg))
                 g.FillEllipse(br, ring);
             using (var pen = new Pen(Clay.Line, 1.5f))
                 g.DrawEllipse(pen, ring);
-            if (Checked)
+            if (Checked && cv > 0.05f)
             {
                 var core = Rectangle.Inflate(ring, -5, -5);
-                using (var br = Clay.Gradient(core, Theme.Current.AccentTop, Theme.Current.AccentBottom))
+                using (var br = new SolidBrush(Color.FromArgb((int)(255 * cv), Theme.Current.AccentBottom)))
                     g.FillEllipse(br, core);
             }
             var tr = new Rectangle(22, 0, Width - 22, Height);
@@ -450,9 +558,9 @@ namespace AutoClickerTool
                 {
                     using (var br = new SolidBrush(BackColor))
                         g.FillPath(br, bp);
-                    // 内凹: 顶部深色细线
+                    // 内凹: 明显一点的外框描边(比背景略深, 避免输入框与背景融为一体)
                     using (var gp = Clay.Round(Rectangle.Inflate(body, -1, -1), Math.Max(1, r - 1)))
-                    using (var pen = new Pen(Color.FromArgb(70, Clay.Line), 1f))
+                    using (var pen = new Pen(Color.FromArgb(150, Clay.Line), 1.5f))
                         g.DrawPath(pen, gp);
                 }
             }
@@ -495,6 +603,7 @@ namespace AutoClickerTool
             _repeatTimer = new Timer { Interval = RepeatDelay };
             _repeatTimer.Tick += delegate
             {
+                if (IsDisposed || Disposing) { _repeatTimer.Stop(); return; }
                 // 按住 ▲▼ 持续增减(首次点击立即生效, 后续按 RepeatRate 连发)
                 if (_pressUp && _hoverUp) UpButton();
                 else if (_pressDown && _hoverDown) DownButton();
@@ -503,16 +612,64 @@ namespace AutoClickerTool
             };
         }
 
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _repeatTimer.Stop();
+                _repeatTimer.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
-            // 隐藏内部编辑框与系统 UpDown 箭头按钮(按类型判断, 子控件顺序因框架版本而异):
-            // 不隐藏的话系统按钮会拦截右侧 ▲▼ 区域的鼠标点击, 与自绘箭头冲突
+            // 隐藏系统 UpDown 箭头按钮(否则拦截右侧 ▲▼ 区域点击);
+            // 保留内部编辑框(UpDownEdit)并样式化, 让用户能点击后键盘直接输入数字。
             foreach (Control c in Controls)
             {
                 string t = c.GetType().Name;
-                if (t == "UpDownButtons" || t == "UpDownEdit") c.Visible = false;
+                if (t == "UpDownButtons")
+                {
+                    c.Visible = false;
+                }
+                else if (t == "UpDownEdit")
+                {
+                    c.Visible = true;
+                    c.BackColor = Theme.Current.InputBg;
+                    c.ForeColor = Enabled ? Theme.Current.Ink : Clay.InkSoft;
+                    if (c is TextBox) ((TextBox)c).BorderStyle = BorderStyle.None;
+                }
             }
+            LayoutEdit();
+        }
+
+        /// <summary>把内部编辑框对齐到文字区(左侧), 右侧留出 ▲▼ 自绘区。</summary>
+        private void LayoutEdit()
+        {
+            foreach (Control c in Controls)
+            {
+                if (c.GetType().Name == "UpDownEdit")
+                {
+                    c.Location = new Point(Dpi.X(4), c.Location.Y);
+                    c.Width = Width - Dpi.X(BtnW) - Dpi.X(8);
+                    break;
+                }
+            }
+        }
+
+        protected override void OnResize(EventArgs e) { base.OnResize(e); LayoutEdit(); }
+
+        protected override void OnEnabledChanged(EventArgs e)
+        {
+            base.OnEnabledChanged(e);
+            foreach (Control c in Controls)
+            {
+                if (c.GetType().Name == "UpDownEdit")
+                    c.ForeColor = Enabled ? Theme.Current.Ink : Clay.InkSoft;
+            }
+            Invalidate();
         }
 
         protected override void OnValueChanged(EventArgs e)
@@ -579,14 +736,11 @@ namespace AutoClickerTool
             using (var br = new SolidBrush(Theme.Current.InputBg))
                 g.FillRectangle(br, ClientRectangle);
 
-            // 数值文本(直接画内部编辑框的当前文本, 支持输入中的中间状态)
-            var tr = new Rectangle(Dpi.X(5), 0, Width - Dpi.X(BtnW) - Dpi.X(10), Height);
-            TextRenderer.DrawText(g, Text, Font, tr, Enabled ? Theme.Current.Ink : Clay.InkSoft,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            // 数值文本由内部编辑框(UpDownEdit)显示, 支持点击后键盘直接输入; 这里不再手动绘制。
 
             // 右侧 ▲▼ 区: 分隔线 + 悬停高亮 + 主题色三角
             int x0 = Width - Dpi.X(BtnW);
-            using (var pen = new Pen(Color.FromArgb(70, Clay.Line), 1f))
+            using (var pen = new Pen(Color.FromArgb(110, Clay.Line), 1f))
                 g.DrawLine(pen, x0, Dpi.X(3), x0, Height - Dpi.X(3) - 1);
 
             if (Enabled && (_hoverUp || _hoverDown))
@@ -638,8 +792,10 @@ namespace AutoClickerTool
     internal class ClayComboBox : ComboBox
     {
         private IntPtr _listBrush = IntPtr.Zero; // GDI 背景刷(下拉列表窗口)
-        private bool _hover;
         private bool _dropped;
+        private float _hoverT;
+
+        private readonly Action<float> _animHover;
 
         public ClayComboBox()
         {
@@ -653,10 +809,11 @@ namespace AutoClickerTool
             ForeColor = Theme.Current.Ink;
             ItemHeight = Dpi.X(20);
             MaxDropDownItems = 9;
+            _animHover = v => { _hoverT = v; Invalidate(); };
         }
 
-        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseEnter(EventArgs e) { Anim.To(_animHover, _hoverT, 1f, 80f); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { Anim.To(_animHover, _hoverT, 0f, 110f); base.OnMouseLeave(e); }
         protected override void OnDropDown(EventArgs e)
         {
             _dropped = true;
@@ -709,10 +866,11 @@ namespace AutoClickerTool
             TextRenderer.DrawText(g, Text, Font, tr, Enabled ? Theme.Current.Ink : Clay.InkSoft,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
 
-            // 右侧下拉箭头: 主题色小三角, 展开时翻转
+            // 右侧下拉箭头: 主题色小三角(悬停淡入), 展开时翻转
             int cx = Width - Dpi.X(11);
             int cy = Height / 2;
-            using (var arrow = new SolidBrush(_hover || _dropped ? Theme.Current.AccentBottom : Clay.InkSoft))
+            Color arrowC = Theme.Blend(Clay.InkSoft, Theme.Current.AccentBottom, _dropped ? 1f : Anim.EaseOutCubic(_hoverT));
+            using (var arrow = new SolidBrush(arrowC))
             {
                 var pts = _dropped
                     ? new[] { new Point(cx - Dpi.X(4), cy - Dpi.X(2)), new Point(cx + Dpi.X(4), cy - Dpi.X(2)), new Point(cx, cy + Dpi.X(3)) }
@@ -750,7 +908,9 @@ namespace AutoClickerTool
     {
         private int _value;
         private bool _drag;
-        private bool _hover;
+        private float _hoverT;
+
+        private readonly Action<float> _animHover;
 
         public event EventHandler ValueChanged;
 
@@ -777,6 +937,7 @@ namespace AutoClickerTool
                      ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
             BackColor = Clay.CardBg;
             _value = 100;
+            _animHover = v => { _hoverT = v; Invalidate(); };
         }
 
         private int Clamp(int v)
@@ -786,8 +947,8 @@ namespace AutoClickerTool
             return Math.Max(lo, Math.Min(hi, v));
         }
 
-        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { _hover = false; _drag = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseEnter(EventArgs e) { Anim.To(_animHover, _hoverT, 1f, 80f); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { _drag = false; Anim.To(_animHover, _hoverT, 0f, 110f); base.OnMouseLeave(e); }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
@@ -852,7 +1013,8 @@ namespace AutoClickerTool
             }
 
             int cx = pad + fillW;
-            int r = Dpi.X(_hover || _drag ? 8 : 7);
+            float ht = Anim.EaseOutCubic(_hoverT);
+            int r = Dpi.X((int)Math.Round(7f + ht));
             var thumb = new Rectangle(cx - r, cy - r, r * 2, r * 2);
             using (var br = new SolidBrush(Enabled ? Theme.Current.AccentBottom : Clay.InkSoft))
                 g.FillEllipse(br, thumb);

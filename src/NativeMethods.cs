@@ -137,6 +137,10 @@ namespace AutoClickerTool
         [DllImport("user32.dll")]
         public static extern uint MapVirtualKey(uint uCode, uint uMapType);
 
+        /// <summary>把单个字符转换为虚拟键码(返回值的低 8 位 = VK, 高 8 位 = shift 状态; 无法映射返回 0xFFFF)。</summary>
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern short VkKeyScan(char ch);
+
         // ---- 窗口边框/标题栏主题(DWM) ----
         public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20; // Win10 20H1+ / Win11
         public const int DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19; // Win10 1809~1909

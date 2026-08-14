@@ -78,7 +78,7 @@ namespace AutoClickerTool
         {
             bool zh = Lang.Code == "zh";
             Text = zh ? "关于 自动点击器" : "About AutoClicker";
-            _lblTitle.Text = zh ? "自动点击器 AutoClicker  v2.0" : "AutoClicker  v2.0";
+            _lblTitle.Text = zh ? "自动点击器 AutoClicker  " + VersionInfo.Version : "AutoClicker  " + VersionInfo.Version;
             _btnOk.Text = Lang.T("OK");
 
             _lblBody.Text = zh

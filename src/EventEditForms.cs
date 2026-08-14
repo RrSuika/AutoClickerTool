@@ -303,4 +303,59 @@ namespace AutoClickerTool
             return true;
         }
     }
+
+    /// <summary>单行文本输入对话框(重命名宏等)。</summary>
+    internal class NamePromptForm : Form
+    {
+        private readonly TextBox _txt;
+
+        public string ValueText { get { return _txt.Text; } }
+
+        public NamePromptForm(string title, string labelText, string initial)
+        {
+            Text = title;
+            AutoScaleMode = AutoScaleMode.None;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            StartPosition = FormStartPosition.CenterParent;
+            BackColor = Clay.WindowBg;
+            Font = new Font("Microsoft YaHei UI", 9F);
+            ClientSize = new Size(Dpi.X(320), Dpi.X(116));
+
+            var card = new ClayPanel { Location = new Point(Dpi.X(10), Dpi.X(10)), Size = new Size(Dpi.X(300), Dpi.X(96)), BackColor = Clay.CardBg };
+            card.Controls.Add(new Label
+            {
+                Text = labelText,
+                Location = new Point(Dpi.X(16), Dpi.X(14)),
+                AutoSize = true,
+                ForeColor = Clay.InkSoft,
+                BackColor = Clay.CardBg
+            });
+            _txt = new TextBox { Text = initial ?? "", Location = new Point(Dpi.X(16), Dpi.X(38)), Width = Dpi.X(268), MaxLength = 80 };
+            card.Controls.Add(_txt);
+            var ok = new ClayButton
+            {
+                Text = Lang.T("OK"),
+                Location = new Point(Dpi.X(140), Dpi.X(66)),
+                Size = new Size(Dpi.X(70), Dpi.X(24)),
+                Accent = true,
+                BackColor = Clay.CardBg
+            };
+            ok.Click += delegate { DialogResult = DialogResult.OK; Close(); };
+            card.Controls.Add(ok);
+            var cancel = new ClayButton
+            {
+                Text = Lang.T("Cancel"),
+                Location = new Point(Dpi.X(218), Dpi.X(66)),
+                Size = new Size(Dpi.X(70), Dpi.X(24)),
+                BackColor = Clay.CardBg
+            };
+            cancel.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
+            card.Controls.Add(cancel);
+            Controls.Add(card);
+            AcceptButton = ok;
+            CancelButton = cancel;
+        }
+    }
 }

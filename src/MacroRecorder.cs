@@ -129,7 +129,29 @@ namespace AutoClickerTool
         {
             if (Recording) return;
             _events.Clear();
-            _events.AddRange(events);
+            if (events == null) return;
+            foreach (var e in events)
+            {
+                if (e == null) continue;
+                Sanitize(e);
+                _events.Add(e);
+            }
+        }
+
+        /// <summary>校正单条事件数据: Kind 越界 / 坐标非法 / 负延迟 / 组合键字段缺失都收敛到安全值, 防止损坏宏回放异常。</summary>
+        private static void Sanitize(MacroEvent e)
+        {
+            int k = (int)e.Kind;
+            if (k < 0 || k > 17) e.Kind = MacroEventKind.Delay;
+            if (e.X < 0) e.X = 0;
+            if (e.Y < 0) e.Y = 0;
+            if (e.X > 32767) e.X = 32767;
+            if (e.Y > 32767) e.Y = 32767;
+            if (e.DelayMs < 0) e.DelayMs = 0;
+            if (e.Kind == MacroEventKind.KeyComboTap || e.Kind == MacroEventKind.KeyComboDown || e.Kind == MacroEventKind.KeyComboUp)
+            {
+                if (string.IsNullOrEmpty(e.Combo)) e.Kind = MacroEventKind.Delay; // 组合键缺字段则退化为延迟, 避免空解析
+            }
         }
 
         public void Clear()
@@ -250,11 +272,12 @@ namespace AutoClickerTool
             }
         }
 
-        /// <summary>键盘按下/抬起合并: 短按变一条"按键", 长按保留两条。</summary>
+        /// <summary>键盘按下/抬起合并: 短按变一条"按键", 长按保留两条; 自动重复的 KeyDown 不重复录制。</summary>
         private void HandleKey(bool down, int vk)
         {
             if (down)
             {
+                if (_pendKey == vk) return; // 按住时的自动重复消息, 只录第一次按下
                 _pendKey = vk;
                 _holdSw.Restart();
                 Record(MacroEventKind.KeyDown, 0, 0, vk);

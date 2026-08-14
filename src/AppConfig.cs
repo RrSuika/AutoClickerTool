@@ -12,6 +12,9 @@ namespace AutoClickerTool
     /// </summary>
     internal class AppConfig
     {
+        /// <summary>配置结构版本号: 未来改字段时据此做迁移, 避免旧配置静默错乱。</summary>
+        public int ConfigVersion = 2;
+
         // ---- 功能热键 ----
         public string ClickerHotkey = "F6";
         public string RecordHotkey = "F7";
@@ -29,12 +32,21 @@ namespace AutoClickerTool
 
         // ---- 键盘连按 ----
         public int SpamVk = 0x41;            // 虚拟键码, 默认 A
+        public string SpamKeyText = "";      // 键盘连按页直接输入的按键文本(空 = 用下拉框选择)
         public int SpamIntervalMs = 100;
         public bool SpamHold = false;
 
         // ---- 录制回放 ----
         public double PlaySpeed = 1.0;
         public bool PlayLoop = false;
+        public int PlayLoops = 0;           // 循环次数, 0 = 无限
+        public int PlayMinutes = 0;         // 运行分钟数, 0 = 不限
+        public string PlayUntilTime = "";   // 运行到系统时刻 "HH:mm", 空 = 不限
+
+        // ---- 软件控制(宏库页) ----
+        public List<string> LaunchPrograms = new List<string>();
+        public bool LaunchOnStart = false;  // 回放开始时自动启动程序
+        public bool LaunchOnEnd = false;    // 回放结束时自动启动程序
 
         // ---- 注入方式与拟人化 ----
         public string InjectionMethod = "SendInput"; // SendInput / SendMessage / InterceptionDriver
@@ -50,15 +62,17 @@ namespace AutoClickerTool
         public bool HumanizeTrajectory = true;    // 贝塞尔移动轨迹
 
         // ---- 按键音效 ----
+        // 注意: JavaScriptSerializer 反序列化要求字典键为字符串, 因此单键绑定用字符串键存键码(JSON 中本就是字符串键, 向后兼容)。
         public bool SfxEnabled = false;
         public int SfxVolume = 100;     // 全局音量 0~100(%)
-        public Dictionary<int, string> SfxBindings = new Dictionary<int, string>(); // 键码 → Sounds 文件夹内文件名
-        public Dictionary<int, int> SfxBindingVolumes = new Dictionary<int, int>(); // 键码 → 单键音量 0~100(缺省用全局)
+        public Dictionary<string, string> SfxBindings = new Dictionary<string, string>(); // 键码(字符串) → Sounds 文件夹内文件名
+        public Dictionary<string, int> SfxBindingVolumes = new Dictionary<string, int>(); // 键码(字符串) → 单键音量 0~100(缺省用全局)
         public Dictionary<string, string> SfxComboBindings = new Dictionary<string, string>(); // 组合键字符串(如 Ctrl+C) → 文件名
         public Dictionary<string, int> SfxComboVolumes = new Dictionary<string, int>(); // 组合键字符串 → 音量 0~100(缺省用全局)
 
         // ---- 界面 ----
         public bool Topmost = false;
+        public bool AnimationsEnabled = true;   // 界面动效(悬停/按压/标签过渡); 关闭 = 全部瞬时(等效减少动态效果)
         public string Language = "zh";       // zh / en
         public string ThemeName = "Clay";    // Clay / ArtDeco / Skeuo / Surreal / Cyber / Y2K
 
@@ -108,7 +122,9 @@ namespace AutoClickerTool
                 if (!File.Exists(FilePath)) return new AppConfig();
                 var ser = new JavaScriptSerializer();
                 var cfg = ser.Deserialize<AppConfig>(File.ReadAllText(FilePath, Encoding.UTF8));
-                return cfg ?? new AppConfig();
+                if (cfg == null) return new AppConfig();
+                Migrate(cfg);
+                return cfg;
             }
             catch (Exception ex)
             {
@@ -117,16 +133,33 @@ namespace AutoClickerTool
             }
         }
 
+        /// <summary>按 ConfigVersion 做增量迁移(旧版本存档加载时逐步升级到当前结构)。</summary>
+        private static void Migrate(AppConfig cfg)
+        {
+            // 当前版本为 2; 未来新增字段时在这里按 cfg.ConfigVersion 补齐, 最后设为最新版本号
+            if (cfg.ConfigVersion < 2)
+            {
+                // 例如: cfg.SpamKeyText = ""; 之类
+                Log.Warn(string.Format("配置从版本 {0} 迁移到 {1}", cfg.ConfigVersion, 2));
+            }
+            cfg.ConfigVersion = 2;
+        }
+
         public void Save()
         {
             try
             {
                 var ser = new JavaScriptSerializer();
-                File.WriteAllText(FilePath, ser.Serialize(this), Encoding.UTF8);
+                string tmp = FilePath + ".tmp";
+                // 原子写: 先写临时文件再替换, 避免中途崩溃/断电损坏 config.json 导致设置全丢
+                File.WriteAllText(tmp, ser.Serialize(this), Encoding.UTF8);
+                if (File.Exists(FilePath)) File.Replace(tmp, FilePath, null);
+                else File.Move(tmp, FilePath);
             }
             catch (Exception)
             {
-                // 保存失败不致命(如程序目录只读), 静默忽略
+                // 保存失败不致命(如程序目录只读), 静默忽略; 清理残留临时文件
+                try { if (File.Exists(FilePath + ".tmp")) File.Delete(FilePath + ".tmp"); } catch (Exception) { }
             }
         }
     }

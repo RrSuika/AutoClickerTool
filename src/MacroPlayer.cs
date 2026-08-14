@@ -17,6 +17,15 @@ namespace AutoClickerTool
         public List<MacroEvent> Events { get; set; }
         public double Speed { get; set; }
         public bool Loop { get; set; }
+        public int LoopCount { get; set; }      // 循环次数, 0 = 无限
+        public int RunMinutes { get; set; }     // 运行分钟数, 0 = 不限
+        public string UntilTime { get; set; }   // 运行到系统时刻 "HH:mm", 空 = 不限
+
+        // 回放中当前按住未抬起的键/按钮, 停止/异常时用于补发抬起, 防止卡键
+        private int _heldKeyVk;
+        private bool _heldKeyExt;
+        private MouseButton _heldBtn = (MouseButton)(-1);
+        private Hotkey _heldCombo;
 
         public void Start()
         {
@@ -49,12 +58,27 @@ namespace AutoClickerTool
         {
             try
             {
+                DateTime started = DateTime.Now;
+                int played = 0;
                 do
                 {
                     foreach (MacroEvent e in Events)
                     {
                         if (!_playing) return;
                         if (!PlayEvent(e)) return;
+                    }
+                    played++;
+                    if (LoopCount > 0 && played >= LoopCount) break;
+                    if (RunMinutes > 0 && (DateTime.Now - started).TotalMinutes >= RunMinutes) break;
+                    if (!string.IsNullOrEmpty(UntilTime))
+                    {
+                        DateTime until;
+                        if (DateTime.TryParseExact(UntilTime, "HH:mm",
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                System.Globalization.DateTimeStyles.None, out until))
+                        {
+                            if (DateTime.Now >= DateTime.Today.Add(until.TimeOfDay)) break;
+                        }
                     }
                 } while (Loop && _playing);
             }
@@ -63,9 +87,36 @@ namespace AutoClickerTool
             }
             finally
             {
+                ReleaseHeld(); // 补发抬起, 避免停止时按住键/鼠标键残留卡键
                 _playing = false;
                 var handler = Finished;
                 if (handler != null) handler();
+            }
+        }
+
+        /// <summary>回放停止/异常时释放所有仍按住的键与鼠标键。</summary>
+        private void ReleaseHeld()
+        {
+            try
+            {
+                if (_heldBtn != (MouseButton)(-1))
+                {
+                    InputSimulator.MouseUp(_heldBtn);
+                    _heldBtn = (MouseButton)(-1);
+                }
+                if (_heldKeyVk != 0)
+                {
+                    InputSimulator.KeyUp(_heldKeyVk, _heldKeyExt);
+                    _heldKeyVk = 0;
+                }
+                if (_heldCombo != null)
+                {
+                    InputSimulator.HotkeyUp(_heldCombo);
+                    _heldCombo = null;
+                }
+            }
+            catch (Exception)
+            {
             }
         }
 
@@ -113,26 +164,32 @@ namespace AutoClickerTool
                 case MacroEventKind.LeftDown:
                     if (!SleepMs(ms)) return false;
                     InputSimulator.MouseDown(MouseButton.Left);
+                    _heldBtn = MouseButton.Left;
                     return true;
                 case MacroEventKind.LeftUp:
                     if (!SleepMs(ms)) return false;
                     InputSimulator.MouseUp(MouseButton.Left);
+                    _heldBtn = (MouseButton)(-1);
                     return true;
                 case MacroEventKind.RightDown:
                     if (!SleepMs(ms)) return false;
                     InputSimulator.MouseDown(MouseButton.Right);
+                    _heldBtn = MouseButton.Right;
                     return true;
                 case MacroEventKind.RightUp:
                     if (!SleepMs(ms)) return false;
                     InputSimulator.MouseUp(MouseButton.Right);
+                    _heldBtn = (MouseButton)(-1);
                     return true;
                 case MacroEventKind.MiddleDown:
                     if (!SleepMs(ms)) return false;
                     InputSimulator.MouseDown(MouseButton.Middle);
+                    _heldBtn = MouseButton.Middle;
                     return true;
                 case MacroEventKind.MiddleUp:
                     if (!SleepMs(ms)) return false;
                     InputSimulator.MouseUp(MouseButton.Middle);
+                    _heldBtn = (MouseButton)(-1);
                     return true;
                 case MacroEventKind.Wheel:
                     if (!SleepMs(ms)) return false;
@@ -141,10 +198,13 @@ namespace AutoClickerTool
                 case MacroEventKind.KeyDown:
                     if (!SleepMs(ms)) return false;
                     InputSimulator.KeyDown(e.Data, InputSimulator.IsExtendedKey(e.Data));
+                    _heldKeyVk = e.Data;
+                    _heldKeyExt = InputSimulator.IsExtendedKey(e.Data);
                     return true;
                 case MacroEventKind.KeyUp:
                     if (!SleepMs(ms)) return false;
                     InputSimulator.KeyUp(e.Data, InputSimulator.IsExtendedKey(e.Data));
+                    _heldKeyVk = 0;
                     return true;
                 // 按键精灵风格合并事件: 单击/点按 = 按下 + 拟人时长 + 抬起
                 case MacroEventKind.LeftClick:
@@ -173,11 +233,13 @@ namespace AutoClickerTool
                     return true;
                 case MacroEventKind.KeyComboDown:
                     if (!SleepMs(ms)) return false;
-                    InputSimulator.HotkeyDown(Hotkey.Parse(e.Combo));
+                    _heldCombo = Hotkey.Parse(e.Combo);
+                    InputSimulator.HotkeyDown(_heldCombo);
                     return true;
                 case MacroEventKind.KeyComboUp:
                     if (!SleepMs(ms)) return false;
                     InputSimulator.HotkeyUp(Hotkey.Parse(e.Combo));
+                    _heldCombo = null;
                     return true;
             }
             return true;

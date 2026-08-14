@@ -1,10 +1,16 @@
 # 构建产物
 AutoClicker.exe
+publish/
 
 # 运行时状态（删掉 config.json = 恢复出厂设置）
 config.json
+config.json.tmp
+log.txt
 Macros/
 Sounds/
+
+# 测试中间产物
+tests/_tests.exe
 
 # 开发期验证截图
 src/verify_*.png

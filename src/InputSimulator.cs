@@ -41,6 +41,9 @@ namespace AutoClickerTool
         private static int _lastTargetY;
         private static bool _hasLastTarget;
 
+        /// <summary>SendMessage 模式共享状态(_lastTarget*)的锁: 多引擎线程并发注入时串行化移动+点击。</summary>
+        private static readonly object SendLock = new object();
+
         // ---------- 鼠标 ----------
 
         public static void MouseDown(MouseButton button)
@@ -94,8 +97,20 @@ namespace AutoClickerTool
 
         public static void ClickAt(int x, int y, MouseButton button)
         {
-            MoveTo(x, y);
-            Click(button);
+            if (Method == InjectionMethod.SendMessage)
+            {
+                // SendMessage 移动+点击共享 _lastTarget 状态, 多引擎并发时锁住整段避免坐标错乱
+                lock (SendLock)
+                {
+                    MoveTo(x, y);
+                    Click(button);
+                }
+            }
+            else
+            {
+                MoveTo(x, y);
+                Click(button);
+            }
         }
 
         public static void Wheel(int delta)
@@ -283,8 +298,12 @@ namespace AutoClickerTool
             if (KeyboardScanCode)
             {
                 // 扫描码注入: 部分游戏不信任 wVk 字段, 只认扫描码
-                input.U.ki.wScan = (ushort)NativeMethods.MapVirtualKey(vk, 0);
+                uint scan = NativeMethods.MapVirtualKey(vk, 0);
+                if (scan == 0) scan = vk; // 无扫描码映射时回退用 vk(避免静默丢失按键)
+                input.U.ki.wScan = (ushort)scan;
                 input.U.ki.dwFlags = NativeMethods.KEYEVENTF_SCANCODE | (up ? NativeMethods.KEYEVENTF_KEYUP : 0);
+                // 扩展键(方向键/Insert/Delete/Home/End/多媒体键等)必须加 EXTENDEDKEY, 否则扫描码不带 0xE0 前缀注入错键
+                if (extended) input.U.ki.dwFlags |= NativeMethods.KEYEVENTF_EXTENDEDKEY;
             }
             else
             {

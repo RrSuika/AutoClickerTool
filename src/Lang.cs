@@ -18,9 +18,9 @@ namespace AutoClickerTool
             var d = new Dictionary<string, string>();
 
             // 通用
-            d["Auto Clicker v2.0"] = "自动点击器 v2.0";
+            d["Auto Clicker {0}"] = "自动点击器 {0}";
             d["Ready"] = "就绪";
-            d["v2.0 · Settings auto-save"] = "v2.0 · 设置自动保存";
+            d["{0} · Settings auto-save"] = "{0} · 设置自动保存";
             d["Topmost"] = "窗口置顶";
             d["Confirm"] = "确认";
             d["Error"] = "错误";
@@ -35,6 +35,7 @@ namespace AutoClickerTool
             d["Hotkeys"] = "热键";
             d["Advanced"] = "高级设置";
             d["Sound FX"] = "音效";
+            d["Macro Library"] = "宏库";
 
             // 顶栏热键提示
             d["Click"] = "连点";
@@ -66,12 +67,14 @@ namespace AutoClickerTool
             // 键盘页
             d["Key Settings"] = "按键设置";
             d["Key:"] = "按键:";
+            d["or type a key:"] = "或直接输入按键:";
             d["Tap (click once per interval)"] = "点按(按间隔点击一下)";
             d["Hold (until stopped)"] = "按住不放(直到停止)";
             d["Start spam ({0})"] = "开始连按 ({0})";
             d["Stop spam ({0})"] = "停止连按 ({0})";
-            d["Tip: keys go to the foreground window. Switch to the target window first, then toggle with the hotkey."]
-                = "提示: 按键发往当前活动窗口。开始前请先切换到目标窗口，再用热键开关。";
+            d["Key not recognized, please select from the list or type a letter/number"] = "无法识别该按键: 请从列表选择, 或输入字母/数字/按键名(如 F1、Space、Enter)";
+            d["Tip: keys go to the foreground window. Switch to the target window first, then toggle with the hotkey.\r\nOr type a key directly: a letter/number, or a name like F1 / Space / Enter."]
+                = "提示: 按键发往当前活动窗口。开始前请先切换到目标窗口，再用热键开关。\r\n也可以直接输入按键: 字母/数字, 或输入下拉列表中的按键名(如 F1、Space、Enter)。";
 
             // 按键名
             d["Space"] = "空格 Space";
@@ -129,6 +132,11 @@ namespace AutoClickerTool
             d["Speed:"] = "回放速度:";
             d["x (1 = original)"] = "倍 (1 = 原速)";
             d["Loop playback (until hotkey stops)"] = "循环回放(直到按热键停止)";
+            d["Loop count:"] = "循环次数:";
+            d["Run minutes:"] = "运行分钟:";
+            d["Until:"] = "直到:";
+            d["Invalid time, use HH:mm format"] = "时间格式无效, 请用 HH:mm (如 23:59)";
+            d["Loop playback hotkey: {0}"] = "循环回放: 按 {0} 开始/停止回放";
             d["Events: {0}"] = "已录制事件:{0}";
             d["Recording live view ({0} shown)"] = "正在录制, 实时显示最近 {0} 条";
             d["Delay(ms)"] = "延迟(ms)";
@@ -136,8 +144,43 @@ namespace AutoClickerTool
             d["Edit delay"] = "编辑延迟";
             d["Add event"] = "添加事件";
             d["Delete selected"] = "删除选中";
-            d["Tip: recording captures mouse moves, clicks, wheel and keys; bound hotkeys and injected clicks are excluded.\r\nAfter stopping you can edit events: double-click a row or use the right-side buttons."]
-                = "提示: 录制包含鼠标移动与按键，已绑定的热键与程序自身注入的点击不会被录进宏。\r\n停止后可以编辑事件: 双击某行修改延迟, 或用右侧按钮添加/删除事件。";
+            d["Tip: recording captures mouse moves, clicks, wheel and keys; bound hotkeys and injected clicks are excluded.\r\nLoop count 0 = infinite; run minutes 0 = no limit; Until + time stops at that clock time. After stopping you can edit events: double-click a row or use the right-side buttons."]
+                = "提示: 录制包含鼠标移动与按键, 已绑定的热键与程序自身注入的点击不会被录进宏。\r\n循环次数 0 = 无限; 运行分钟 0 = 不限时; 勾选\"直到\"并填 HH:mm 时刻即运行到该时刻停止。停止后双击某行可编辑延迟, 或用右侧按钮添加/删除事件。";
+
+            // 宏库页
+            d["Saved macros"] = "已存宏";
+            d["Macro name"] = "宏名称";
+            d["Events"] = "事件数";
+            d["Modified"] = "修改时间";
+            d["Play this macro"] = "播放此宏";
+            d["Rename..."] = "重命名...";
+            d["Rename"] = "重命名";
+            d["Create a copy"] = "创建副本";
+            d["Delete macro"] = "删除宏";
+            d["Refresh"] = "刷新";
+            d["Open macros folder"] = "打开宏文件夹";
+            d["Select a macro first"] = "请先选择一个宏";
+            d["Macro name:"] = "宏名称:";
+            d["Macro \"{0}\" already exists"] = "宏 \"{0}\" 已存在";
+            d["Macro renamed to {0}"] = "宏已重命名为 {0}";
+            d["Rename failed: {0}"] = "重命名失败: {0}";
+            d["Macro copy created: {0}"] = "已创建宏副本: {0}";
+            d["Copy failed: {0}"] = "复制失败: {0}";
+            d["Macro deleted: {0}"] = "已删除宏: {0}";
+            d["Delete failed: {0}"] = "删除失败: {0}";
+            d["Macro is empty or corrupted"] = "宏为空或文件损坏";
+            d["Playing macro: {0}"] = "正在播放宏: {0}";
+            d["Software control"] = "软件控制";
+            d["Add program..."] = "添加程序...";
+            d["Remove program"] = "移除程序";
+            d["Launch programs when playback starts"] = "回放开始时自动启动程序";
+            d["Launch programs when playback ends"] = "回放结束时自动启动程序";
+            d["Select a program to launch"] = "选择要自动启动的程序";
+            d["Program added: {0}"] = "已添加程序: {0}";
+            d["Select a program first"] = "请先选择一个程序";
+            d["Launch failed: {0}"] = "启动程序失败: {0}";
+            d["Tip: click the ▶ button on the left of a saved macro to run it immediately; click the name to select it, then rename / copy / delete on the right.\r\nPrograms in the Software control list auto-launch when playback starts or ends."]
+                = "提示: 点击宏名称左侧的 ▶ 立即播放该宏; 点击名称选中后, 可在右侧重命名/创建副本/删除。\r\n软件控制列表中的程序会在回放开始/结束时自动启动。";
 
             // 事件描述
             d["Move to ({0}, {1})"] = "移动到 ({0}, {1})";
@@ -265,8 +308,9 @@ namespace AutoClickerTool
             d["Select sound file"] = "选择音效文件";
             d["Key sound effects enabled"] = "按键音效已开启";
             d["Key sound effects disabled"] = "按键音效已关闭";
-            d["Driver mode: download and install the driver from github.com/oblitum/Interception (admin required),\r\nthen put interception.dll next to this program. Driver-level input is indistinguishable from real hardware.\r\nNote: with HVCI (memory integrity) enabled, unsigned drivers may fail to load.\r\nIf a game checks process names, you can rename this exe."]
-                = "驱动模式说明: 从 github.com/oblitum/Interception 下载并安装驱动(需管理员权限), 再把\r\ninterception.dll 放到本程序目录。驱动层注入与真实硬件输入无异, 可绕过绝大多数屏蔽。\r\n注意: 系统开启内核隔离/内存完整性(HVCI)时, 未签名驱动可能无法加载。\r\n如游戏检测进程名, 可自行重命名本程序 exe 文件。";
+            d["Driver mode: install the driver (github.com/oblitum/Interception, admin) and put interception.dll next to this exe.\r\nHVCI (memory integrity) may block unsigned drivers; rename this exe to dodge process-name checks."]
+                = "驱动模式说明: 从 github.com/oblitum/Interception 安装驱动(需管理员权限), 并把 interception.dll\r\n放到本程序目录。驱动层注入与真实硬件输入无异。\r\n系统开启内核隔离/内存完整性(HVCI)时未签名驱动可能无法加载; 如游戏检测进程名, 可自行重命名本程序 exe。";
+            d["Enable UI animations (hover / press / tab transitions)"] = "启用界面动效(悬停 / 按压 / 标签切换过渡)";
 
             // 状态消息
             d["Clicker running, press {0} to stop"] = "连点运行中，按 {0} 停止";

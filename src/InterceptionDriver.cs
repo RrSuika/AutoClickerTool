@@ -77,6 +77,9 @@ namespace AutoClickerTool
 
         private IntPtr _ctx;
 
+        /// <summary>串行化所有驱动调用: 连点/回放等多引擎线程可能并发注入, 避免互相踩过滤器。</summary>
+        private static readonly object Lock = new object();
+
         /// <summary>检测 interception.dll 与驱动是否可用。</summary>
         public static bool IsDllPresent()
         {
@@ -170,16 +173,35 @@ namespace AutoClickerTool
 
         private void SendKey(InterceptionKeyStroke[] strokes)
         {
-            interception_set_filter(_ctx, PREDICATE_KEYBOARD, FILTER_KEY_ALL);
-            SendKeyStroke(_ctx, DEVICE_KEYBOARD, strokes, (uint)strokes.Length);
-            interception_set_filter(_ctx, PREDICATE_KEYBOARD, FILTER_KEY_NONE);
+            lock (Lock)
+            {
+                interception_set_filter(_ctx, PREDICATE_KEYBOARD, FILTER_KEY_ALL);
+                try
+                {
+                    SendKeyStroke(_ctx, DEVICE_KEYBOARD, strokes, (uint)strokes.Length);
+                }
+                finally
+                {
+                    // 无论发送是否成功都要复位过滤器, 否则驱动会一直拦截系统键盘输入(全局卡键)
+                    interception_set_filter(_ctx, PREDICATE_KEYBOARD, FILTER_KEY_NONE);
+                }
+            }
         }
 
         private void SendMouse(InterceptionMouseStroke[] strokes)
         {
-            interception_set_filter(_ctx, PREDICATE_MOUSE, FILTER_MOUSE_ALL);
-            SendMouseStroke(_ctx, DEVICE_MOUSE, strokes, (uint)strokes.Length);
-            interception_set_filter(_ctx, PREDICATE_MOUSE, FILTER_MOUSE_NONE);
+            lock (Lock)
+            {
+                interception_set_filter(_ctx, PREDICATE_MOUSE, FILTER_MOUSE_ALL);
+                try
+                {
+                    SendMouseStroke(_ctx, DEVICE_MOUSE, strokes, (uint)strokes.Length);
+                }
+                finally
+                {
+                    interception_set_filter(_ctx, PREDICATE_MOUSE, FILTER_MOUSE_NONE);
+                }
+            }
         }
 
         private static int CursorX()

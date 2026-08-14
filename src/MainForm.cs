@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Text;
 using System.Web.Script.Serialization;
@@ -49,6 +50,7 @@ namespace AutoClickerTool
 
         // 键盘连按
         private ComboBox cboKey;
+        private TextBox txtKey;
         private RadioButton rbTap;
         private RadioButton rbHold;
         private NumericUpDown numKeyInterval;
@@ -70,6 +72,26 @@ namespace AutoClickerTool
         private Button btnDeleteEvent;
         private ContextMenuStrip _eventMenu; // 事件列表右键菜单
 
+        // 回放运行限制 + 循环热键提示
+        private NumericUpDown numPlayLoops;
+        private NumericUpDown numPlayMinutes;
+        private CheckBox chkUntilTime;
+        private TextBox txtUntilTime;
+        private Label lblLoopHint;
+
+        // 宏库页
+        private ListView lstMacros;
+        private Button btnMacroRename;
+        private Button btnMacroCopy;
+        private Button btnMacroDelete;
+        private ContextMenuStrip _macroMenu; // 宏列表右键菜单
+        private ListBox lstPrograms;
+        private Button btnProgramAdd;
+        private Button btnProgramRemove;
+        private CheckBox chkLaunchStart;
+        private CheckBox chkLaunchEnd;
+        private readonly List<string> _macroFiles = new List<string>(); // 宏库列表对应的完整路径
+
         // 热键页
         private Button[] _hkButtons;
         private Button btnResetHotkeys;
@@ -90,6 +112,7 @@ namespace AutoClickerTool
         private CheckBox chkHumanizeTraj;
         private ComboBox cboLanguage;
         private ComboBox cboTheme;
+        private CheckBox chkAnimations;
 
         // 按键音效页
         private CheckBox chkSfx;
@@ -122,6 +145,12 @@ namespace AutoClickerTool
         private Label lblStatus;
         private Button btnAbout;
 
+        // 标签切换内容过渡
+        private Panel _fadeOverlay;
+        private Bitmap _fadeTo;
+        private float _fadeT = 1f;
+        private readonly Action<float> _animFade;
+
         private DateTime _lastTestClick = DateTime.MinValue;
 
         public MainForm()
@@ -131,7 +160,24 @@ namespace AutoClickerTool
             _cfg = AppConfig.Load(out cfgError);
             Lang.Code = _cfg.Language == "en" ? "en" : "zh";
             Theme.Current = Theme.ById(_cfg.ThemeName);
-            if (!string.IsNullOrEmpty(cfgError)) _loadNotes.Add(Lang.T("Config load failed, using defaults"));
+            if (!string.IsNullOrEmpty(cfgError)) { _loadNotes.Add(Lang.T("Config load failed, using defaults")); Log.Warn("配置加载失败, 使用默认值: " + cfgError); }
+            else Log.Info("配置加载成功");
+
+            _animFade = v =>
+            {
+                _fadeT = v;
+                if (_fadeOverlay != null) _fadeOverlay.Invalidate();
+                if (v >= 0.999f) EndFade();
+            };
+
+            // 未捕获异常兜底: 停引擎释放按住键, 防止 Hold 模式崩溃后卡键残留
+            AppDomain.CurrentDomain.UnhandledException += delegate(object s, UnhandledExceptionEventArgs e)
+            {
+                try { Log.Error("未捕获后台线程异常: " + (e.ExceptionObject == null ? "(无对象)" : e.ExceptionObject.ToString())); } catch (Exception) { }
+                StopEnginesSilent();
+            };
+            // 注意: Application.ThreadException / SetUnhandledExceptionMode 必须在 Program.Main 里
+            // (创建任何窗口之前)调用, 放在这里会抛 InvalidOperationException。
 
             AppConfig.EnsureDataDirs();
 
@@ -141,14 +187,20 @@ namespace AutoClickerTool
 
             _clicker.Stopped += () => Ui(() => { UpdateClickerUi(); SetStatus(Lang.T("Clicker stopped")); });
             _spammer.Stopped += () => Ui(() => { UpdateKeyboardUi(); SetStatus(Lang.T("Keyboard spam stopped")); });
-            _player.Finished += () => Ui(() => { UpdatePlayUi(); SetStatus(Lang.T("Playback finished")); });
-            _recorder.AutoStopRequested += () => BeginInvoke((Action)(() =>
+            _player.Finished += () => Ui(() =>
+            {
+                UpdatePlayUi();
+                UpdateRecordUi();
+                SetStatus(Lang.T("Playback finished"));
+                if (_cfg != null && _cfg.LaunchOnEnd) LaunchPrograms();
+            });
+            _recorder.AutoStopRequested += () => Ui(() =>
             {
                 _recorder.Stop();
                 UpdateRecordUi();
                 RefreshEventList(false);
                 SetStatus(Lang.T("Event limit reached (200k), recording auto-stopped"));
-            }));
+            });
 
             // 热键 → 功能映射(任意组合键)
             _recorder.Hotkeys = _hotkeys;
@@ -235,7 +287,7 @@ namespace AutoClickerTool
 
         private void BuildUi()
         {
-            Text = Lang.T("Auto Clicker v2.0");
+            Text = Lang.F("Auto Clicker {0}", VersionInfo.Version);
             ClientSize = new Size(Dpi.X(560), Dpi.X(530));
             // 可拖拽缩放, 最小尺寸保证各控件之间的间距与可读性
             MinimumSize = new Size(Dpi.X(562), Dpi.X(520));
@@ -269,7 +321,7 @@ namespace AutoClickerTool
             // 3. 页面先停靠到内容区(立即获得最终尺寸), 再填充内容。
             Action<Panel>[] builders =
             {
-                BuildClickerPage, BuildKeyboardPage, BuildMacroPage, BuildHotkeyPage, BuildAdvancedPage, BuildSfxPage
+                BuildClickerPage, BuildKeyboardPage, BuildMacroPage, BuildHotkeyPage, BuildAdvancedPage, BuildSfxPage, BuildLibraryPage
             };
             _pages = new Panel[builders.Length];
             for (int i = 0; i < builders.Length; i++)
@@ -280,6 +332,30 @@ namespace AutoClickerTool
                 builders[i](page);                // 再填充 → 锚点按正确父尺寸计算
                 page.Visible = (i == 0);          // 填充完成后才隐藏非活动页(隐藏页也必须先完成停靠)
             }
+
+            // 4. 内容切换过渡覆盖层: 最后添加(最上层), 默认隐藏。
+            _fadeOverlay = new Panel { Dock = DockStyle.Fill, Visible = false, BackColor = Clay.WindowBg };
+            typeof(Panel).GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .SetValue(_fadeOverlay, true, null);
+            _fadeOverlay.Paint += delegate(object s, PaintEventArgs pe)
+            {
+                // 背景由 Panel.BackColor(WindowBg)填充; 这里只把"新页快照"以"上滑 + 淡入"方式画出
+                if (_fadeTo != null)
+                {
+                    float t = Anim.EaseOutCubic(_fadeT);
+                    int dy = (int)Math.Round(Dpi.X(10) * (1f - t)); // 从下 10px 处滑入到位
+                    var cm = new ColorMatrix { Matrix33 = t };       // alpha 淡入
+                    using (var ia = new ImageAttributes())
+                    {
+                        ia.SetColorMatrix(cm);
+                        pe.Graphics.DrawImage(_fadeTo,
+                            new Rectangle(0, dy, _fadeTo.Width, _fadeTo.Height),
+                            0, 0, _fadeTo.Width, _fadeTo.Height, GraphicsUnit.Pixel, ia);
+                    }
+                }
+            };
+            _contentPanel.Controls.Add(_fadeOverlay);
+            _fadeOverlay.BringToFront();
         }
 
         /// <summary>顶栏: 热键提示 + 置顶开关。</summary>
@@ -309,15 +385,15 @@ namespace AutoClickerTool
         /// <summary>胶囊标签页条。</summary>
         private void BuildTabStrip()
         {
-            string[] tabNames = { Lang.T("Mouse Clicking"), Lang.T("Keyboard Spam"), Lang.T("Record & Play"), Lang.T("Hotkeys"), Lang.T("Advanced"), Lang.T("Sound FX") };
-            int[] tabWidths = { 88, 88, 88, 64, 88, 72 };
+            string[] tabNames = { Lang.T("Mouse Clicking"), Lang.T("Keyboard Spam"), Lang.T("Record & Play"), Lang.T("Hotkeys"), Lang.T("Advanced"), Lang.T("Sound FX"), Lang.T("Macro Library") };
+            int[] tabWidths = { 78, 78, 78, 56, 78, 64, 78 };
             _tabBtns = new Button[tabNames.Length];
             for (int i = 0; i < tabNames.Length; i++)
             {
                 var b = new ClayButton
                 {
                     Text = tabNames[i],
-                    Location = new Point(Dpi.X(10 + i * 92), Dpi.X(3)),
+                    Location = new Point(Dpi.X(10 + i * 78), Dpi.X(3)),
                     Size = new Size(Dpi.X(tabWidths[i]), Dpi.X(28)),
                     Tab = true,
                     Selected = i == 0,
@@ -355,8 +431,8 @@ namespace AutoClickerTool
             _statusBar.Controls.Add(btnAbout);
             _lblVersion = new Label
             {
-                Name = "v2.0 · Settings auto-save",
-                Text = Lang.T("v2.0 · Settings auto-save"),
+                Name = "{0} · Settings auto-save",
+                Text = Lang.F("{0} · Settings auto-save", VersionInfo.Version),
                 Location = new Point(Dpi.X(430), Dpi.X(5)),
                 Size = new Size(Dpi.X(118), Dpi.X(16)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Right,
@@ -369,15 +445,72 @@ namespace AutoClickerTool
 
         private void SelectTab(int index)
         {
+            bool same = index == _currentTab;
+
             _currentTab = index;
             for (int i = 0; i < _tabBtns.Length; i++)
             {
                 var b = (ClayButton)_tabBtns[i];
                 b.Selected = i == index;
                 b.Font = new Font(Font, i == index ? FontStyle.Bold : FontStyle.Regular);
+                b.SetSelectionT(i == index ? 1f : 0f); // 选中态交叉淡入
                 b.Invalidate();
                 _pages[i].Visible = i == index;
             }
+            _pages[index].CreateControl();  // 确保子控件句柄已创建, 快照才能渲染完整
+            _pages[index].PerformLayout();
+            if (index == 6) RefreshMacroList(); // 每次进入宏库页刷新已存宏列表
+
+            if (!same) StartReveal(SnapshotPage(_pages[index]));
+        }
+
+        /// <summary>把页面渲染成位图快照(用于切换时的上滑淡入)。</summary>
+        private static Bitmap SnapshotPage(Control page)
+        {
+            try
+            {
+                int w = Math.Max(1, page.Width);
+                int h = Math.Max(1, page.Height);
+                var bmp = new Bitmap(w, h);
+                page.DrawToBitmap(bmp, new Rectangle(0, 0, w, h));
+                return bmp;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>用单张"新页快照"做上滑淡入过渡(比双图交叉淡化更省、更明显、更顺滑)。</summary>
+        private void StartReveal(Bitmap to)
+        {
+            if (_fadeOverlay == null)
+            {
+                if (to != null) to.Dispose();
+                return;
+            }
+            DisposeFadeBitmaps();
+            if (to == null)
+            {
+                _fadeOverlay.Visible = false;
+                return;
+            }
+            _fadeTo = to;
+            _fadeT = 0f;
+            _fadeOverlay.Visible = true;
+            _fadeOverlay.BringToFront();
+            Anim.To(_animFade, 0f, 1f, 95f);
+        }
+
+        private void EndFade()
+        {
+            if (_fadeOverlay != null) _fadeOverlay.Visible = false;
+            DisposeFadeBitmaps();
+        }
+
+        private void DisposeFadeBitmaps()
+        {
+            if (_fadeTo != null) { _fadeTo.Dispose(); _fadeTo = null; }
         }
 
         // 小组件快捷构造: 卡片内标签 / 页面提示文字。
@@ -459,7 +592,7 @@ namespace AutoClickerTool
 
         private void BuildKeyboardPage(Panel page)
         {
-            var gb = Grp("Key Settings", 10, 10, 524, 122);
+            var gb = Grp("Key Settings", 10, 10, 524, 150);
             gb.Controls.Add(Lbl("Key:", 15, 33));
             cboKey = new ClayComboBox();
             foreach (var kv in _keyOptions) cboKey.Items.Add(kv.Key);
@@ -467,17 +600,23 @@ namespace AutoClickerTool
             gb.Controls.Add(ClayKit.InputShell(cboKey, 60, 29, 115));
             rbTap = new ClayRadio { Name = "Tap (click once per interval)", Text = Lang.T("Tap (click once per interval)"), Location = new Point(Dpi.X(200), Dpi.X(32)), Checked = true };
             rbHold = new ClayRadio { Name = "Hold (until stopped)", Text = Lang.T("Hold (until stopped)"), Location = new Point(Dpi.X(360), Dpi.X(32)) };
-            gb.Controls.Add(Lbl("Interval (ms):", 15, 72));
+
+            // 直接输入按键: 免去在下拉列表里逐个翻找
+            gb.Controls.Add(Lbl("or type a key:", 15, 67));
+            txtKey = new TextBox { BorderStyle = BorderStyle.None, MaxLength = 16 };
+            gb.Controls.Add(ClayKit.InputShell(txtKey, 135, 63, 105));
+
+            gb.Controls.Add(Lbl("Interval (ms):", 15, 101));
             numKeyInterval = new ClayNumericUpDown { Minimum = 1, Maximum = 3600000, Value = 100, BorderStyle = BorderStyle.None };
-            gb.Controls.Add(ClayKit.InputShell(numKeyInterval, 95, 68, 80));
+            gb.Controls.Add(ClayKit.InputShell(numKeyInterval, 95, 97, 80));
             gb.Controls.AddRange(new Control[] { rbTap, rbHold });
             page.Controls.Add(gb);
 
-            btnKeyboardToggle = new ClayButton { Text = Lang.F("Start spam ({0})", "F9"), Location = new Point(Dpi.X(15), Dpi.X(145)), Size = new Size(Dpi.X(170), Dpi.X(42)), Accent = true, BackColor = Clay.WindowBg };
-            lblKeyboardState = new Label { Text = Lang.T("Status: Idle"), Location = new Point(Dpi.X(195), Dpi.X(157)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
+            btnKeyboardToggle = new ClayButton { Text = Lang.F("Start spam ({0})", "F9"), Location = new Point(Dpi.X(15), Dpi.X(175)), Size = new Size(Dpi.X(170), Dpi.X(42)), Accent = true, BackColor = Clay.WindowBg };
+            lblKeyboardState = new Label { Text = Lang.T("Status: Idle"), Location = new Point(Dpi.X(195), Dpi.X(187)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
             page.Controls.AddRange(new Control[] { btnKeyboardToggle, lblKeyboardState });
 
-            page.Controls.Add(Tip("Tip: keys go to the foreground window. Switch to the target window first, then toggle with the hotkey.", 12, 200));
+            page.Controls.Add(Tip("Tip: keys go to the foreground window. Switch to the target window first, then toggle with the hotkey.\r\nOr type a key directly: a letter/number, or a name like F1 / Space / Enter.", 12, 232));
         }
 
         private void BuildMacroPage(Panel page)
@@ -491,20 +630,36 @@ namespace AutoClickerTool
             gbRec.Controls.AddRange(new Control[] { btnRecord, btnPlay, btnSave, btnLoad, btnClear });
             page.Controls.Add(gbRec);
 
-            var gbOpt = Grp("Playback Options", 10, 100, 524, 75);
+            var gbOpt = Grp("Playback Options", 10, 100, 524, 124);
             gbOpt.Controls.Add(Lbl("Speed:", 15, 32));
             numSpeed = new ClayNumericUpDown { Minimum = 0.1m, Maximum = 10m, Increment = 0.1m, DecimalPlaces = 1, Value = 1m, BorderStyle = BorderStyle.None };
             gbOpt.Controls.Add(ClayKit.InputShell(numSpeed, 85, 28, 70));
             gbOpt.Controls.Add(Lbl("x (1 = original)", 165, 32));
             chkLoop = new ClayCheck { Name = "Loop playback (until hotkey stops)", Text = Lang.T("Loop playback (until hotkey stops)"), Location = new Point(Dpi.X(260), Dpi.X(30)) };
             gbOpt.Controls.Add(chkLoop);
+
+            // 运行限制: 循环次数 / 运行分钟数 / 运行到系统时刻
+            gbOpt.Controls.Add(Lbl("Loop count:", 15, 64));
+            numPlayLoops = new ClayNumericUpDown { Minimum = 0, Maximum = 999999, Value = 0, BorderStyle = BorderStyle.None };
+            gbOpt.Controls.Add(ClayKit.InputShell(numPlayLoops, 95, 60, 50));
+            gbOpt.Controls.Add(Lbl("Run minutes:", 155, 64));
+            numPlayMinutes = new ClayNumericUpDown { Minimum = 0, Maximum = 99999, Value = 0, BorderStyle = BorderStyle.None };
+            gbOpt.Controls.Add(ClayKit.InputShell(numPlayMinutes, 240, 60, 45));
+            gbOpt.Controls.Add(Lbl("Until:", 300, 64));
+            chkUntilTime = new ClayCheck { Location = new Point(Dpi.X(330), Dpi.X(62)) };
+            txtUntilTime = new TextBox { BorderStyle = BorderStyle.None, Text = "23:59", MaxLength = 5, Enabled = false };
+            gbOpt.Controls.Add(ClayKit.InputShell(txtUntilTime, 365, 60, 55));
+
+            // 循环回放开/关快捷键提示(跟随热键设置)
+            lblLoopHint = new Label { Location = new Point(Dpi.X(15), Dpi.X(96)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.CardBg };
+            gbOpt.Controls.Add(lblLoopHint);
             page.Controls.Add(gbOpt);
 
             // 事件列表(虚拟模式: 录制时实时刷新, 20 万条也流畅)
             var lstShell = new ClayPanel
             {
-                Location = new Point(Dpi.X(10), Dpi.X(185)),
-                Size = new Size(Dpi.X(420), Dpi.X(128)),
+                Location = new Point(Dpi.X(10), Dpi.X(234)),
+                Size = new Size(Dpi.X(420), Dpi.X(112)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Inset = true,
                 BackColor = Theme.Current.InputBg
@@ -512,7 +667,7 @@ namespace AutoClickerTool
             lstEvents = new ListView
             {
                 Location = new Point(Dpi.X(4), Dpi.X(4)),
-                Size = new Size(Dpi.X(412), Dpi.X(120)),
+                Size = new Size(Dpi.X(412), Dpi.X(104)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
                 View = View.Details,
                 VirtualMode = true,
@@ -579,15 +734,121 @@ namespace AutoClickerTool
             };
 
             // 事件编辑按钮
-            btnEditDelay = new ClayButton { Name = "Edit delay", Text = Lang.T("Edit delay"), Location = new Point(Dpi.X(440), Dpi.X(185)), Size = new Size(Dpi.X(94), Dpi.X(30)), Anchor = AnchorStyles.Top | AnchorStyles.Right };
-            btnAddEvent = new ClayButton { Name = "Add event", Text = Lang.T("Add event"), Location = new Point(Dpi.X(440), Dpi.X(222)), Size = new Size(Dpi.X(94), Dpi.X(30)), Anchor = AnchorStyles.Top | AnchorStyles.Right };
-            btnDeleteEvent = new ClayButton { Name = "Delete selected", Text = Lang.T("Delete selected"), Location = new Point(Dpi.X(440), Dpi.X(259)), Size = new Size(Dpi.X(94), Dpi.X(30)), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            btnEditDelay = new ClayButton { Name = "Edit delay", Text = Lang.T("Edit delay"), Location = new Point(Dpi.X(440), Dpi.X(234)), Size = new Size(Dpi.X(94), Dpi.X(30)), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            btnAddEvent = new ClayButton { Name = "Add event", Text = Lang.T("Add event"), Location = new Point(Dpi.X(440), Dpi.X(266)), Size = new Size(Dpi.X(94), Dpi.X(30)), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            btnDeleteEvent = new ClayButton { Name = "Delete selected", Text = Lang.T("Delete selected"), Location = new Point(Dpi.X(440), Dpi.X(298)), Size = new Size(Dpi.X(94), Dpi.X(30)), Anchor = AnchorStyles.Top | AnchorStyles.Right };
             page.Controls.AddRange(new Control[] { btnEditDelay, btnAddEvent, btnDeleteEvent });
 
-            lblEventCount = new Label { Text = Lang.F("Events: {0}", 0), Location = new Point(Dpi.X(15), Dpi.X(320)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
+            lblEventCount = new Label { Text = Lang.F("Events: {0}", 0), Location = new Point(Dpi.X(15), Dpi.X(354)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
             page.Controls.Add(lblEventCount);
 
-            page.Controls.Add(Tip("Tip: recording captures mouse moves, clicks, wheel and keys; bound hotkeys and injected clicks are excluded.\r\nAfter stopping you can edit events: double-click a row or use the right-side buttons.", 12, 343));
+            page.Controls.Add(Tip("Tip: recording captures mouse moves, clicks, wheel and keys; bound hotkeys and injected clicks are excluded.\r\nLoop count 0 = infinite; run minutes 0 = no limit; Until + time stops at that clock time. After stopping you can edit events: double-click a row or use the right-side buttons.", 12, 372));
+        }
+
+        private void BuildLibraryPage(Panel page)
+        {
+            // ---- 已存宏列表: 最左侧 ▶ 快速触发, 点击选中后右侧可重命名/副本/删除 ----
+            var gbMacros = Grp("Saved macros", 10, 10, 524, 214);
+            var shell = new ClayPanel
+            {
+                Location = new Point(Dpi.X(10), Dpi.X(28)),
+                Size = new Size(Dpi.X(390), Dpi.X(172)),
+                Inset = true,
+                BackColor = Theme.Current.InputBg
+            };
+            lstMacros = new ListView
+            {
+                Location = new Point(Dpi.X(4), Dpi.X(4)),
+                Size = new Size(Dpi.X(382), Dpi.X(164)),
+                View = View.Details,
+                FullRowSelect = true,
+                HideSelection = false,
+                BorderStyle = BorderStyle.None,
+                BackColor = Theme.Current.InputBg,
+                ForeColor = Clay.Ink
+            };
+            lstMacros.Columns.Add("▶", Dpi.X(36));
+            lstMacros.Columns.Add(Lang.T("Macro name"), Dpi.X(150));
+            lstMacros.Columns.Add(Lang.T("Events"), Dpi.X(56));
+            lstMacros.Columns.Add(Lang.T("Modified"), Dpi.X(130));
+            typeof(ListView).GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .SetValue(lstMacros, true, null);
+            shell.Controls.Add(lstMacros);
+            gbMacros.Controls.Add(shell);
+
+            _macroMenu = ClayMenu.Build();
+            ToolStripMenuItem mi;
+            mi = ClayMenu.Item(_macroMenu, "Play this macro");
+            mi.Click += delegate { PlaySelectedMacro(); };
+            mi = ClayMenu.Item(_macroMenu, "Rename...");
+            mi.Click += delegate { RenameMacro(); };
+            mi = ClayMenu.Item(_macroMenu, "Create a copy");
+            mi.Click += delegate { CopyMacro(); };
+            _macroMenu.Items.Add(new ToolStripSeparator());
+            mi = ClayMenu.Item(_macroMenu, "Delete macro");
+            mi.Click += delegate { DeleteMacro(); };
+            lstMacros.MouseUp += delegate(object s, MouseEventArgs e)
+            {
+                if (e.Button == MouseButtons.Right)
+                {
+                    var item = lstMacros.GetItemAt(e.X, e.Y);
+                    if (item != null)
+                    {
+                        lstMacros.SelectedIndices.Clear();
+                        lstMacros.SelectedIndices.Add(item.Index);
+                    }
+                    UpdateMacroButtons();
+                    _macroMenu.Show(lstMacros, e.Location);
+                    return;
+                }
+                // 最左侧 ▶ 列 = 快速触发按钮
+                if (e.Button == MouseButtons.Left && lstMacros.Columns.Count > 0 && e.X < lstMacros.Columns[0].Width)
+                {
+                    var item = lstMacros.GetItemAt(e.X, e.Y);
+                    if (item != null) PlayMacroFile(_macroFiles[item.Index]);
+                }
+            };
+            lstMacros.DoubleClick += delegate { PlaySelectedMacro(); };
+
+            btnMacroRename = new ClayButton { Name = "Rename", Text = Lang.T("Rename"), Location = new Point(Dpi.X(410), Dpi.X(28)), Size = new Size(Dpi.X(104), Dpi.X(30)) };
+            btnMacroCopy = new ClayButton { Name = "Create a copy", Text = Lang.T("Create a copy"), Location = new Point(Dpi.X(410), Dpi.X(65)), Size = new Size(Dpi.X(104), Dpi.X(30)) };
+            btnMacroDelete = new ClayButton { Name = "Delete macro", Text = Lang.T("Delete macro"), Location = new Point(Dpi.X(410), Dpi.X(102)), Size = new Size(Dpi.X(104), Dpi.X(30)) };
+            var btnMacroRefresh = new ClayButton { Name = "Refresh", Text = Lang.T("Refresh"), Location = new Point(Dpi.X(410), Dpi.X(139)), Size = new Size(Dpi.X(104), Dpi.X(30)) };
+            var btnMacroFolder = new ClayButton { Name = "Open macros folder", Text = Lang.T("Open macros folder"), Location = new Point(Dpi.X(410), Dpi.X(176)), Size = new Size(Dpi.X(104), Dpi.X(30)) };
+            btnMacroRefresh.Click += delegate { RefreshMacroList(); };
+            btnMacroFolder.Click += delegate { OpenMacrosFolder(); };
+            gbMacros.Controls.AddRange(new Control[] { btnMacroRename, btnMacroCopy, btnMacroDelete, btnMacroRefresh, btnMacroFolder });
+            page.Controls.Add(gbMacros);
+
+            // ---- 软件控制: 自动启动程序 ----
+            var gbSoft = Grp("Software control", 10, 234, 524, 150);
+            var softShell = new ClayPanel
+            {
+                Location = new Point(Dpi.X(10), Dpi.X(28)),
+                Size = new Size(Dpi.X(300), Dpi.X(80)),
+                Inset = true,
+                BackColor = Theme.Current.InputBg
+            };
+            lstPrograms = new ListBox
+            {
+                Location = new Point(Dpi.X(4), Dpi.X(4)),
+                Size = new Size(Dpi.X(292), Dpi.X(72)),
+                BorderStyle = BorderStyle.None,
+                BackColor = Theme.Current.InputBg,
+                ForeColor = Clay.Ink,
+                IntegralHeight = false
+            };
+            softShell.Controls.Add(lstPrograms);
+            gbSoft.Controls.Add(softShell);
+            btnProgramAdd = new ClayButton { Name = "Add program...", Text = Lang.T("Add program..."), Location = new Point(Dpi.X(325), Dpi.X(28)), Size = new Size(Dpi.X(100), Dpi.X(30)) };
+            btnProgramRemove = new ClayButton { Name = "Remove program", Text = Lang.T("Remove program"), Location = new Point(Dpi.X(325), Dpi.X(65)), Size = new Size(Dpi.X(100), Dpi.X(30)) };
+            gbSoft.Controls.AddRange(new Control[] { btnProgramAdd, btnProgramRemove });
+            chkLaunchStart = new ClayCheck { Name = "Launch programs when playback starts", Text = Lang.T("Launch programs when playback starts"), Location = new Point(Dpi.X(15), Dpi.X(118)) };
+            chkLaunchEnd = new ClayCheck { Name = "Launch programs when playback ends", Text = Lang.T("Launch programs when playback ends"), Location = new Point(Dpi.X(230), Dpi.X(118)) };
+            gbSoft.Controls.AddRange(new Control[] { chkLaunchStart, chkLaunchEnd });
+            page.Controls.Add(gbSoft);
+
+            page.Controls.Add(Tip("Tip: click the ▶ button on the left of a saved macro to run it immediately; click the name to select it, then rename / copy / delete on the right.\r\nPrograms in the Software control list auto-launch when playback starts or ends.", 12, 392));
         }
 
         private void BuildHotkeyPage(Panel page)
@@ -663,8 +924,8 @@ namespace AutoClickerTool
             gbHuman.Controls.AddRange(new Control[] { chkHumanizeEnabled, chkHumanizeTiming, chkHumanizePos, chkHumanizePress, chkHumanizeTraj });
             page.Controls.Add(gbHuman);
 
-            // ---- 界面: 语言与主题 ----
-            var gbUi = Grp("Interface", 10, 290, 524, 66);
+            // ---- 界面: 语言与主题 / 动效 ----
+            var gbUi = Grp("Interface", 10, 290, 524, 92);
             gbUi.Controls.Add(Lbl("Language:", 15, 28));
             cboLanguage = new ClayComboBox();
             cboLanguage.Items.AddRange(new object[] { Lang.T("中文"), Lang.T("English") });
@@ -675,9 +936,11 @@ namespace AutoClickerTool
             foreach (var t in Theme.All) cboTheme.Items.Add(Lang.Code == "zh" ? t.NameZh : t.NameEn);
             cboTheme.SelectedIndex = 0;
             gbUi.Controls.Add(ClayKit.InputShell(cboTheme, 305, 24, 195));
+            chkAnimations = new ClayCheck { Name = "Enable UI animations (hover / press / tab transitions)", Text = Lang.T("Enable UI animations (hover / press / tab transitions)"), Location = new Point(Dpi.X(15), Dpi.X(58)), Checked = true };
+            gbUi.Controls.Add(chkAnimations);
             page.Controls.Add(gbUi);
 
-            page.Controls.Add(Tip("Driver mode: download and install the driver from github.com/oblitum/Interception (admin required),\r\nthen put interception.dll next to this program. Driver-level input is indistinguishable from real hardware.\r\nNote: with HVCI (memory integrity) enabled, unsigned drivers may fail to load.\r\nIf a game checks process names, you can rename this exe.", 12, 366));
+            page.Controls.Add(Tip("Driver mode: install the driver (github.com/oblitum/Interception, admin) and put interception.dll next to this exe.\r\nHVCI (memory integrity) may block unsigned drivers; rename this exe to dodge process-name checks.", 12, 392));
         }
 
         private void BuildSfxPage(Panel page)
@@ -753,6 +1016,19 @@ namespace AutoClickerTool
             btnEditDelay.Click += delegate { EditDelay(); };
             btnAddEvent.Click += delegate { AddEvent(); };
             btnDeleteEvent.Click += delegate { DeleteEvent(); };
+            lstEvents.SelectedIndexChanged += delegate { if (!_applying) UpdateEventEditButtons(); };
+            chkUntilTime.CheckedChanged += delegate { txtUntilTime.Enabled = chkUntilTime.Checked; if (!_applying) SaveSettings(); };
+            txtUntilTime.TextChanged += delegate { if (!_applying) SaveSettings(); };
+
+            // 宏库页
+            lstMacros.SelectedIndexChanged += delegate { if (!_applying) UpdateMacroButtons(); };
+            btnMacroRename.Click += delegate { RenameMacro(); };
+            btnMacroCopy.Click += delegate { CopyMacro(); };
+            btnMacroDelete.Click += delegate { DeleteMacro(); };
+            btnProgramAdd.Click += delegate { AddProgram(); };
+            btnProgramRemove.Click += delegate { RemoveProgram(); };
+            chkLaunchStart.CheckedChanged += delegate { if (!_applying) SaveSettings(); };
+            chkLaunchEnd.CheckedChanged += delegate { if (!_applying) SaveSettings(); };
             chkTopmost.CheckedChanged += delegate { TopMost = chkTopmost.Checked; };
             btnAbout.Click += delegate { using (var f = new AboutForm()) f.ShowDialog(this); };
             rbTap.CheckedChanged += delegate { numKeyInterval.Enabled = rbTap.Checked; };
@@ -807,7 +1083,7 @@ namespace AutoClickerTool
                 if (sel == null) return;
                 sel.Volume = (int)sldKeyVolume.Value;
                 if (sel.IsCombo) _cfg.SfxComboVolumes[sel.Combo] = sel.Volume;
-                else _cfg.SfxBindingVolumes[sel.Vk] = sel.Volume;
+                else _cfg.SfxBindingVolumes[sel.Vk.ToString()] = sel.Volume;
                 lblKeyVol.Text = sel.Volume + "%";
                 ApplySfxToEngine();
                 SaveSettings();
@@ -839,6 +1115,13 @@ namespace AutoClickerTool
                 ApplyTheme();
                 SaveSettings();
             };
+            chkAnimations.CheckedChanged += delegate
+            {
+                if (_applying) return;
+                Anim.Enabled = chkAnimations.Checked;
+                SaveSettings();
+                Invalidate(true);
+            };
         }
 
         // ---------- 语言 / 主题应用 ----------
@@ -860,10 +1143,10 @@ namespace AutoClickerTool
 
         private void ApplyLanguage()
         {
-            Text = Lang.T("Auto Clicker v2.0");
+            Text = Lang.F("Auto Clicker {0}", VersionInfo.Version);
             ApplyLangWalk(this);
 
-            string[] tabNames = { Lang.T("Mouse Clicking"), Lang.T("Keyboard Spam"), Lang.T("Record & Play"), Lang.T("Hotkeys"), Lang.T("Advanced"), Lang.T("Sound FX") };
+            string[] tabNames = { Lang.T("Mouse Clicking"), Lang.T("Keyboard Spam"), Lang.T("Record & Play"), Lang.T("Hotkeys"), Lang.T("Advanced"), Lang.T("Sound FX"), Lang.T("Macro Library") };
             for (int i = 0; i < _tabBtns.Length; i++) _tabBtns[i].Text = tabNames[i];
 
             if (lstEvents.Columns.Count == 2)
@@ -880,6 +1163,21 @@ namespace AutoClickerTool
                     if (it is ToolStripSeparator) continue;
                     it.Text = Lang.T(it.Name);
                 }
+            }
+            if (_macroMenu != null)
+            {
+                foreach (ToolStripItem it in _macroMenu.Items)
+                {
+                    if (it is ToolStripSeparator) continue;
+                    it.Text = Lang.T(it.Name);
+                }
+            }
+            if (lstMacros != null && lstMacros.Columns.Count == 4)
+            {
+                lstMacros.Columns[1].Text = Lang.T("Macro name");
+                lstMacros.Columns[2].Text = Lang.T("Events");
+                lstMacros.Columns[3].Text = Lang.T("Modified");
+                RefreshMacroList();
             }
             if (lstSfx.Columns.Count == 2)
             {
@@ -1057,8 +1355,6 @@ namespace AutoClickerTool
                     if (i >= 0 && i + 1 <= _recorder.Events.Count)
                     {
                         _recorder.Events.Insert(i + 1, f.Result);
-                        lstEvents.SelectedIndices.Clear();
-                        lstEvents.SelectedIndices.Add(i + 1);
                         SetStatus(Lang.F("Event added at position {0}", i + 2));
                     }
                     else
@@ -1067,6 +1363,12 @@ namespace AutoClickerTool
                         SetStatus(Lang.F("Event added at position {0}", _recorder.Events.Count));
                     }
                     RefreshEventList(false);
+                    // VirtualListSize 变化可能清空选择: 重新选中新增事件
+                    int sel = Math.Min(i + 1, _recorder.Events.Count - 1);
+                    if (sel < 0) sel = _recorder.Events.Count - 1;
+                    lstEvents.SelectedIndices.Clear();
+                    lstEvents.SelectedIndices.Add(sel);
+                    UpdateRecordUi();
                 }
             }
         }
@@ -1084,6 +1386,7 @@ namespace AutoClickerTool
                 return;
             _recorder.Events.RemoveAt(i);
             RefreshEventList(false);
+            UpdateRecordUi();
             SetStatus(Lang.T("Event deleted"));
         }
 
@@ -1100,6 +1403,7 @@ namespace AutoClickerTool
             lstEvents.SelectedIndices.Clear();
             lstEvents.SelectedIndices.Add(j);
             RefreshEventList(false);
+            UpdateRecordUi();
         }
 
         // ---------- 任务开关 ----------
@@ -1124,6 +1428,8 @@ namespace AutoClickerTool
             _clicker.FixedY = (int)numY.Value;
             _clicker.RepeatCount = (int)numRepeat.Value;
             _clicker.Start();
+            Log.Info(string.Format("开始连点: 间隔={0}ms 按键={1} 模式={2} 次数={3}",
+                _clicker.IntervalMs, _clicker.Button, _clicker.FixedPosition ? "固定坐标" : "跟随光标", _clicker.RepeatCount));
             UpdateClickerUi();
             SetStatus(Lang.F("Clicker running, press {0} to stop", _hotkeys.Describe(HotkeyAction.Clicker)));
         }
@@ -1136,14 +1442,47 @@ namespace AutoClickerTool
                 SetStatus(Lang.T("Stopping keyboard spam..."));
                 return;
             }
-            var kv = _keyOptions[cboKey.SelectedIndex];
-            _spammer.Vk = kv.Value;
+            int vk = ResolveKeyVk();
+            if (vk <= 0)
+            {
+                SetStatus(Lang.T("Key not recognized, please select from the list or type a letter/number"));
+                return;
+            }
+            _spammer.Vk = vk;
             _spammer.IntervalMs = (int)numKeyInterval.Value;
             _spammer.Mode = rbHold.Checked ? KeySpamMode.Hold : KeySpamMode.Tap;
-            _spammer.ExtendedKey = InputSimulator.IsExtendedKey(kv.Value);
+            _spammer.ExtendedKey = InputSimulator.IsExtendedKey(vk);
             _spammer.Start();
+            Log.Info(string.Format("开始连按: VK=0x{0:X2} 间隔={1}ms 模式={2}", vk, _spammer.IntervalMs, _spammer.Mode));
             UpdateKeyboardUi();
             SetStatus(Lang.F("Keyboard spam running, press {0} to stop", _hotkeys.Describe(HotkeyAction.Keyboard)));
+        }
+
+        /// <summary>
+        /// 解析键盘连按的按键: 输入框有内容时优先按输入解析(按键名或单个字符), 空则用下拉框选择。
+        /// 返回虚拟键码; 无法识别返回 0。
+        /// </summary>
+        private int ResolveKeyVk()
+        {
+            string t = txtKey != null && txtKey.Text != null ? txtKey.Text.Trim() : "";
+            if (t.Length > 0)
+            {
+                // 1. 名称匹配(与下拉框显示名一致, 忽略大小写): "F1" / "Space" / "Enter" / "CapsLock" ...
+                for (int i = 0; i < _keyOptions.Count; i++)
+                {
+                    if (string.Equals(_keyOptions[i].Key, t, StringComparison.OrdinalIgnoreCase))
+                        return _keyOptions[i].Value;
+                }
+                // 2. 单个字符(字母/数字/符号): 经 VkKeyScan 转虚拟键码(忽略 shift 状态)
+                if (t.Length == 1)
+                {
+                    short s = NativeMethods.VkKeyScan(t[0]);
+                    int vk = s & 0xFF;
+                    if (vk != 0xFF) return vk;
+                }
+                return 0;
+            }
+            return _keyOptions[cboKey.SelectedIndex].Value;
         }
 
         private void ToggleRecord()
@@ -1160,9 +1499,11 @@ namespace AutoClickerTool
             _recorder.Start();
             if (!_recorder.Recording)
             {
+                Log.Warn("录制启动失败");
                 SetStatus(Lang.T("Recording failed to start"));
                 return;
             }
+            Log.Info("开始录制");
             UpdateRecordUi();
             RefreshEventList(false);
             SetStatus(Lang.F("Recording... (old macro cleared) press {0} to stop", _hotkeys.Describe(HotkeyAction.Record)));
@@ -1182,13 +1523,34 @@ namespace AutoClickerTool
                 SetStatus(Lang.T("No macro to play, record first"));
                 return;
             }
+            string until = chkUntilTime.Checked && txtUntilTime != null ? txtUntilTime.Text.Trim() : "";
+            if (chkUntilTime.Checked && !IsValidTime(until))
+            {
+                SetStatus(Lang.T("Invalid time, use HH:mm format"));
+                return;
+            }
             _player.Events = _recorder.Snapshot();
             _player.Speed = (double)numSpeed.Value;
             _player.Loop = chkLoop.Checked;
+            _player.LoopCount = (int)numPlayLoops.Value;
+            _player.RunMinutes = (int)numPlayMinutes.Value;
+            _player.UntilTime = until;
             _player.Start();
+            Log.Info(string.Format("开始回放: 事件={0} 倍速={1} 循环={2} 次数={3} 分钟={4} 直到={5}",
+                _player.Events.Count, _player.Speed, _player.Loop, _player.LoopCount, _player.RunMinutes,
+                string.IsNullOrEmpty(until) ? "不限" : until));
+            if (_cfg.LaunchOnStart) LaunchPrograms();
             UpdateRecordUi();
             UpdatePlayUi();
             SetStatus(Lang.F("Playing... press {0} to stop", _hotkeys.Describe(HotkeyAction.Play)));
+        }
+
+        private static bool IsValidTime(string t)
+        {
+            DateTime dt;
+            return DateTime.TryParseExact(t, "HH:mm",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out dt);
         }
 
         private void StopAll()
@@ -1197,6 +1559,7 @@ namespace AutoClickerTool
             _spammer.Stop();
             _player.Stop();
             if (_recorder.Recording) _recorder.Stop();
+            Log.Info("停止全部引擎");
             UpdateAllUi();
             SetStatus(Lang.F("Stopped all ({0})", _hotkeys.Describe(HotkeyAction.StopAll)));
         }
@@ -1235,6 +1598,7 @@ namespace AutoClickerTool
             {
                 timer.Stop();
                 timer.Dispose();
+                if (IsDisposed || Disposing) return;
                 NativeMethods.POINT p;
                 if (NativeMethods.GetCursorPos(out p))
                 {
@@ -1263,7 +1627,9 @@ namespace AutoClickerTool
                     {
                         var ser = new JavaScriptSerializer();
                         File.WriteAllText(dlg.FileName, ser.Serialize(_recorder.Events), Encoding.UTF8);
+                        Log.Info(string.Format("保存宏: {0} ({1} 个事件)", dlg.FileName, _recorder.Events.Count));
                         SetStatus(Lang.F("Macro saved: {0}", dlg.FileName));
+                        RefreshMacroList();
                     }
                     catch (Exception ex)
                     {
@@ -1288,6 +1654,8 @@ namespace AutoClickerTool
                         _recorder.Load(list);
                         UpdateAllUi();
                         RefreshEventList(false);
+                        RefreshMacroList();
+                        Log.Info(string.Format("加载宏: {0} ({1} 个事件)", dlg.FileName, list.Count));
                         SetStatus(Lang.F("Macro loaded: {0} events", list.Count));
                     }
                     catch (Exception ex)
@@ -1306,6 +1674,274 @@ namespace AutoClickerTool
             UpdateAllUi();
             RefreshEventList(false);
             SetStatus(Lang.T("Macro cleared"));
+        }
+
+        // ---------- 宏库: 已存宏列表 + 软件控制 ----------
+
+        private void RefreshMacroList()
+        {
+            if (lstMacros == null) return;
+            string selName = SelectedMacroIndex() >= 0 ? lstMacros.Items[SelectedMacroIndex()].SubItems[1].Text : "";
+            _macroFiles.Clear();
+            lstMacros.Items.Clear();
+            try
+            {
+                if (!Directory.Exists(AppConfig.MacrosDir)) return;
+                string[] files = Directory.GetFiles(AppConfig.MacrosDir, "*.json");
+                Array.Sort(files, StringComparer.OrdinalIgnoreCase);
+                foreach (string f in files)
+                {
+                    _macroFiles.Add(f);
+                    var name = Path.GetFileNameWithoutExtension(f);
+                    int events = -1;
+                    try
+                    {
+                        var ser = new JavaScriptSerializer();
+                        var list = ser.Deserialize<List<MacroEvent>>(File.ReadAllText(f, Encoding.UTF8));
+                        events = list != null ? list.Count : -1;
+                    }
+                    catch (Exception)
+                    {
+                        events = -1; // 损坏文件
+                    }
+                    var lvi = new ListViewItem(new[] { "▶", name, events >= 0 ? events.ToString() : "?", File.GetLastWriteTime(f).ToString("yyyy-MM-dd HH:mm") });
+                    lvi.ForeColor = Clay.Ink;
+                    lstMacros.Items.Add(lvi);
+                }
+                if (selName.Length > 0)
+                {
+                    for (int i = 0; i < lstMacros.Items.Count; i++)
+                    {
+                        if (lstMacros.Items[i].SubItems[1].Text == selName)
+                        {
+                            lstMacros.SelectedIndices.Clear();
+                            lstMacros.SelectedIndices.Add(i);
+                            break;
+                        }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+            }
+            UpdateMacroButtons();
+        }
+
+        private int SelectedMacroIndex()
+        {
+            if (lstMacros != null && lstMacros.SelectedIndices.Count > 0) return lstMacros.SelectedIndices[0];
+            return -1;
+        }
+
+        private void UpdateMacroButtons()
+        {
+            bool has = SelectedMacroIndex() >= 0;
+            btnMacroRename.Enabled = has;
+            btnMacroCopy.Enabled = has;
+            btnMacroDelete.Enabled = has;
+        }
+
+        /// <summary>快速触发: 加载宏文件并立即开始回放(使用当前回放设置)。</summary>
+        private void PlayMacroFile(string file)
+        {
+            try
+            {
+                if (_recorder.Recording) _recorder.Stop();
+                if (_player.Playing) _player.Stop();
+                var ser = new JavaScriptSerializer();
+                var list = ser.Deserialize<List<MacroEvent>>(File.ReadAllText(file, Encoding.UTF8));
+                if (list == null || list.Count == 0)
+                {
+                    SetStatus(Lang.T("Macro is empty or corrupted"));
+                    return;
+                }
+                _recorder.Load(list);
+                RefreshEventList(false);
+                UpdateRecordUi();
+                TogglePlay();
+                SetStatus(Lang.F("Playing macro: {0}", Path.GetFileNameWithoutExtension(file)));
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, Lang.F("Load failed: {0}", ex.Message), Lang.T("Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void PlaySelectedMacro()
+        {
+            int i = SelectedMacroIndex();
+            if (i < 0 || i >= _macroFiles.Count)
+            {
+                SetStatus(Lang.T("Select a macro first"));
+                return;
+            }
+            PlayMacroFile(_macroFiles[i]);
+        }
+
+        private void RenameMacro()
+        {
+            int i = SelectedMacroIndex();
+            if (i < 0 || i >= _macroFiles.Count)
+            {
+                SetStatus(Lang.T("Select a macro first"));
+                return;
+            }
+            string oldFile = _macroFiles[i];
+            string oldName = Path.GetFileNameWithoutExtension(oldFile);
+            using (var f = new NamePromptForm(Lang.T("Rename"), Lang.T("Macro name:"), oldName))
+            {
+                if (f.ShowDialog(this) != DialogResult.OK) return;
+                string newName = SanitizeFileName(f.ValueText.Trim());
+                if (newName.Length == 0 || newName == oldName) return;
+                string newFile = Path.Combine(Path.GetDirectoryName(oldFile), newName + ".json");
+                if (File.Exists(newFile))
+                {
+                    SetStatus(Lang.F("Macro \"{0}\" already exists", newName));
+                    return;
+                }
+                try
+                {
+                    File.Move(oldFile, newFile);
+                    RefreshMacroList();
+                    SetStatus(Lang.F("Macro renamed to {0}", newName));
+                }
+                catch (Exception ex)
+                {
+                    SetStatus(Lang.F("Rename failed: {0}", ex.Message));
+                }
+            }
+        }
+
+        private void CopyMacro()
+        {
+            int i = SelectedMacroIndex();
+            if (i < 0 || i >= _macroFiles.Count)
+            {
+                SetStatus(Lang.T("Select a macro first"));
+                return;
+            }
+            string oldFile = _macroFiles[i];
+            string dir = Path.GetDirectoryName(oldFile);
+            string name = Path.GetFileNameWithoutExtension(oldFile);
+            string newFile = Path.Combine(dir, name + " - copy.json");
+            int n = 2;
+            while (File.Exists(newFile)) newFile = Path.Combine(dir, name + " - copy " + n++ + ".json");
+            try
+            {
+                File.Copy(oldFile, newFile);
+                RefreshMacroList();
+                SetStatus(Lang.F("Macro copy created: {0}", Path.GetFileNameWithoutExtension(newFile)));
+            }
+            catch (Exception ex)
+            {
+                SetStatus(Lang.F("Copy failed: {0}", ex.Message));
+            }
+        }
+
+        private void DeleteMacro()
+        {
+            int i = SelectedMacroIndex();
+            if (i < 0 || i >= _macroFiles.Count)
+            {
+                SetStatus(Lang.T("Select a macro first"));
+                return;
+            }
+            string name = Path.GetFileNameWithoutExtension(_macroFiles[i]);
+            if (MessageBox.Show(this, Lang.F("Delete macro \"{0}\"?", name), Lang.T("Delete macro"),
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            try
+            {
+                File.Delete(_macroFiles[i]);
+                RefreshMacroList();
+                SetStatus(Lang.F("Macro deleted: {0}", name));
+            }
+            catch (Exception ex)
+            {
+                SetStatus(Lang.F("Delete failed: {0}", ex.Message));
+            }
+        }
+
+        private static string SanitizeFileName(string name)
+        {
+            char[] bad = Path.GetInvalidFileNameChars();
+            foreach (char c in bad) name = name.Replace(c.ToString(), "_");
+            name = name.TrimEnd(' ', '.'); // 尾部空格/点会让文件系统报错或产生隐患
+            // Windows 保留设备名(CON/PRN/AUX/NUL/COM1-9/LPT1-9)不能作文件名
+            string upper = name.ToUpperInvariant();
+            string[] reserved = { "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9" };
+            foreach (string r in reserved) { if (upper == r) name = "_" + name; }
+            return name.Trim();
+        }
+
+        private void OpenMacrosFolder()
+        {
+            try
+            {
+                AppConfig.EnsureDataDirs();
+                Process.Start("explorer.exe", AppConfig.MacrosDir);
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private void RefreshProgramList()
+        {
+            if (lstPrograms == null) return;
+            lstPrograms.Items.Clear();
+            if (_cfg == null || _cfg.LaunchPrograms == null) return;
+            foreach (string p in _cfg.LaunchPrograms) lstPrograms.Items.Add(p);
+        }
+
+        private void AddProgram()
+        {
+            using (var dlg = new OpenFileDialog
+            {
+                Filter = "程序 (*.exe;*.bat;*.cmd;*.lnk)|*.exe;*.bat;*.cmd;*.lnk|所有文件 (*.*)|*.*",
+                Title = Lang.T("Select a program to launch")
+            })
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                if (!_cfg.LaunchPrograms.Contains(dlg.FileName))
+                {
+                    _cfg.LaunchPrograms.Add(dlg.FileName);
+                    RefreshProgramList();
+                    SaveSettings();
+                    SetStatus(Lang.F("Program added: {0}", dlg.FileName));
+                }
+            }
+        }
+
+        private void RemoveProgram()
+        {
+            if (lstPrograms.SelectedIndex < 0 || lstPrograms.SelectedIndex >= _cfg.LaunchPrograms.Count)
+            {
+                SetStatus(Lang.T("Select a program first"));
+                return;
+            }
+            _cfg.LaunchPrograms.RemoveAt(lstPrograms.SelectedIndex);
+            RefreshProgramList();
+            SaveSettings();
+        }
+
+        /// <summary>按配置启动程序列表(播放开始/结束时)。</summary>
+        private void LaunchPrograms()
+        {
+            if (_cfg == null || _cfg.LaunchPrograms == null) return;
+            foreach (string p in _cfg.LaunchPrograms)
+            {
+                if (string.IsNullOrWhiteSpace(p)) continue;
+                try
+                {
+                    Process.Start(p);
+                    Log.Info("启动程序: " + p);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error("启动程序失败: " + p + " - " + ex.Message);
+                    SetStatus(Lang.F("Launch failed: {0}", ex.Message));
+                }
+            }
         }
 
         // ---------- 热键捕获 ----------
@@ -1376,6 +2012,7 @@ namespace AutoClickerTool
             {
                 timer.Stop();
                 timer.Dispose();
+                if (IsDisposed || Disposing) return;
                 IntPtr h = NativeMethods.GetForegroundWindow();
                 if (h != IntPtr.Zero)
                 {
@@ -1403,9 +2040,11 @@ namespace AutoClickerTool
             _sfx.Combos.Clear();
             foreach (var kv in _cfg.SfxBindings)
             {
-                _sfx.Bindings[kv.Key] = Path.Combine(AppConfig.SoundsDir, kv.Value);
+                int vk;
+                if (!int.TryParse(kv.Key, out vk)) continue;
+                _sfx.Bindings[vk] = Path.Combine(AppConfig.SoundsDir, kv.Value);
                 int perKey = _cfg.SfxBindingVolumes.ContainsKey(kv.Key) ? _cfg.SfxBindingVolumes[kv.Key] : _cfg.SfxVolume;
-                _sfx.Volumes[kv.Key] = perKey * 10; // 0~100 → 0~1000
+                _sfx.Volumes[vk] = perKey * 10; // 0~100 → 0~1000
             }
             foreach (var kv in _cfg.SfxComboBindings)
             {
@@ -1436,7 +2075,7 @@ namespace AutoClickerTool
                 {
                     sldKeyVolume.Enabled = false;
                     lblKeyVol.Text = "";
-                    sldKeyVolume.Value = _cfg.SfxVolume;
+                    // 未选中任何按键绑定时, 不联动"选中按键音量"滑块(只让它保持不动)
                 }
                 else
                 {
@@ -1458,8 +2097,10 @@ namespace AutoClickerTool
             foreach (var kv in _cfg.SfxBindings)
             {
                 string file = kv.Value;
+                int vk;
+                if (!int.TryParse(kv.Key, out vk)) continue;
                 int vol = _cfg.SfxBindingVolumes.ContainsKey(kv.Key) ? _cfg.SfxBindingVolumes[kv.Key] : _cfg.SfxVolume;
-                var sk = new SfxKey { IsCombo = false, Vk = kv.Key, Display = Hotkey.GetName((uint)kv.Key), File = file, Volume = vol };
+                var sk = new SfxKey { IsCombo = false, Vk = vk, Display = Hotkey.GetName((uint)vk), File = file, Volume = vol };
                 _sfxKeys.Add(sk);
                 var lvi = new ListViewItem(new[] { sk.Display, file });
                 lvi.ForeColor = Clay.Ink;
@@ -1516,7 +2157,7 @@ namespace AutoClickerTool
                         if (!string.Equals(dlg.FileName, dest, StringComparison.OrdinalIgnoreCase) && !File.Exists(dest))
                             File.Copy(dlg.FileName, dest);
                         if (isCombo) _cfg.SfxComboBindings[combo] = fileName; // 同组合旧绑定被覆盖
-                        else _cfg.SfxBindings[vk] = fileName;                 // 同键旧绑定被覆盖
+                        else _cfg.SfxBindings[vk.ToString()] = fileName;      // 同键旧绑定被覆盖
                         ApplySfxToEngine();
                         SaveSettings();
                         RefreshSfxList();
@@ -1545,8 +2186,8 @@ namespace AutoClickerTool
             }
             else
             {
-                _cfg.SfxBindings.Remove(sel.Vk);
-                if (_cfg.SfxBindingVolumes.ContainsKey(sel.Vk)) _cfg.SfxBindingVolumes.Remove(sel.Vk);
+                _cfg.SfxBindings.Remove(sel.Vk.ToString());
+                if (_cfg.SfxBindingVolumes.ContainsKey(sel.Vk.ToString())) _cfg.SfxBindingVolumes.Remove(sel.Vk.ToString());
             }
             ApplySfxToEngine();
             SaveSettings();
@@ -1680,6 +2321,8 @@ namespace AutoClickerTool
             int tab = _currentTab;
             // 注意: 不能用 SuspendLayout 包裹重建——挂起期间 Dock 链不会传播父容器尺寸,
             // 卡片会在父容器仍是默认 200px 宽时计算 Left|Right 锚点偏移, 重新撑爆窗口。
+            Anim.Clear();          // 清掉仍在跑动画的旧控件委托(Controls.Clear 会销毁它们)
+            DisposeFadeBitmaps();  // 释放过渡快照
             Controls.Clear();
             BuildUi();
             WireEvents();
@@ -1715,6 +2358,7 @@ namespace AutoClickerTool
                 numY.Value = Clamp(cfg.ClickFixedY, 0, 20000);
                 numRepeat.Value = Clamp(cfg.ClickRepeatCount, 0, 100000000);
 
+                txtKey.Text = cfg.SpamKeyText ?? "";
                 int keyIdx = _keyOptions.FindIndex(kv => kv.Value == cfg.SpamVk);
                 cboKey.SelectedIndex = keyIdx >= 0 ? keyIdx : 0;
                 rbHold.Checked = cfg.SpamHold;
@@ -1724,6 +2368,11 @@ namespace AutoClickerTool
                 numSpeed.Value = (decimal)Math.Max((double)numSpeed.Minimum,
                     Math.Min((double)numSpeed.Maximum, cfg.PlaySpeed));
                 chkLoop.Checked = cfg.PlayLoop;
+                numPlayLoops.Value = Clamp(cfg.PlayLoops, 0, 999999);
+                numPlayMinutes.Value = Clamp(cfg.PlayMinutes, 0, 99999);
+                chkUntilTime.Checked = !string.IsNullOrEmpty(cfg.PlayUntilTime);
+                txtUntilTime.Text = string.IsNullOrEmpty(cfg.PlayUntilTime) ? "23:59" : cfg.PlayUntilTime;
+                txtUntilTime.Enabled = chkUntilTime.Checked;
                 chkTopmost.Checked = cfg.Topmost;
 
                 ApplyHotkey(HotkeyAction.Clicker, cfg.ClickerHotkey);
@@ -1769,11 +2418,19 @@ namespace AutoClickerTool
                 {
                     if (Theme.All[i] == Theme.Current) cboTheme.SelectedIndex = i;
                 }
+                Anim.Enabled = cfg.AnimationsEnabled;
+                chkAnimations.Checked = cfg.AnimationsEnabled;
+
+                // 宏库页: 软件控制
+                RefreshProgramList();
+                chkLaunchStart.Checked = cfg.LaunchOnStart;
+                chkLaunchEnd.Checked = cfg.LaunchOnEnd;
 
                 PushToEngines();
                 UpdateHotkeyUi();
                 UpdateAllUi();
                 RefreshEventList(false);
+                RefreshMacroList();
             }
             finally
             {
@@ -1828,13 +2485,28 @@ namespace AutoClickerTool
             _cfg.ClickFixedY = (int)numY.Value;
             _cfg.ClickRepeatCount = (int)numRepeat.Value;
 
-            var kv = _keyOptions[cboKey.SelectedIndex];
-            _cfg.SpamVk = kv.Value;
+            string keyText = txtKey.Text == null ? "" : txtKey.Text.Trim();
+            if (keyText.Length > 0)
+            {
+                int vk = ResolveKeyVk();
+                if (vk > 0) _cfg.SpamVk = vk;
+                _cfg.SpamKeyText = keyText;
+            }
+            else
+            {
+                _cfg.SpamVk = _keyOptions[cboKey.SelectedIndex].Value;
+                _cfg.SpamKeyText = "";
+            }
             _cfg.SpamIntervalMs = (int)numKeyInterval.Value;
             _cfg.SpamHold = rbHold.Checked;
 
             _cfg.PlaySpeed = (double)numSpeed.Value;
             _cfg.PlayLoop = chkLoop.Checked;
+            _cfg.PlayLoops = (int)numPlayLoops.Value;
+            _cfg.PlayMinutes = (int)numPlayMinutes.Value;
+            _cfg.PlayUntilTime = chkUntilTime.Checked ? txtUntilTime.Text.Trim() : "";
+            _cfg.LaunchOnStart = chkLaunchStart.Checked;
+            _cfg.LaunchOnEnd = chkLaunchEnd.Checked;
             _cfg.Topmost = chkTopmost.Checked;
 
             _cfg.InjectionMethod = cboMethod.SelectedIndex == 0 ? "SendInput"
@@ -1855,6 +2527,7 @@ namespace AutoClickerTool
 
             _cfg.Language = Lang.Code;
             _cfg.ThemeName = Theme.Current.Id;
+            _cfg.AnimationsEnabled = chkAnimations.Checked;
 
             _cfg.Save();
         }
@@ -1926,11 +2599,17 @@ namespace AutoClickerTool
             rb.Accent = !_recorder.Recording;
             rb.Danger = _recorder.Recording;
             rb.Invalidate();
-            // 录制/回放中禁止编辑事件
+            UpdateEventEditButtons();
+        }
+
+        /// <summary>事件编辑按钮可用状态: 录制/回放中禁用, 编辑/删除需选中事件。</summary>
+        private void UpdateEventEditButtons()
+        {
             bool busy = _recorder.Recording || _player.Playing;
-            btnEditDelay.Enabled = !busy && _recorder.Count > 0;
+            bool has = SelectedEventIndex() >= 0;
+            btnEditDelay.Enabled = !busy && has;
             btnAddEvent.Enabled = !busy;
-            btnDeleteEvent.Enabled = !busy && _recorder.Count > 0;
+            btnDeleteEvent.Enabled = !busy && has;
         }
 
         private void UpdatePlayUi()
@@ -1940,6 +2619,8 @@ namespace AutoClickerTool
             pb.Accent = !_player.Playing;
             pb.Danger = _player.Playing;
             pb.Invalidate();
+            if (lblLoopHint != null)
+                lblLoopHint.Text = Lang.F("Loop playback hotkey: {0}", _hotkeys.Describe(HotkeyAction.Play));
         }
 
         private void UpdateAllUi()
@@ -1959,8 +2640,20 @@ namespace AutoClickerTool
             _recorder.Dispose();
             _hotkeys.Dispose();
             _sfx.Dispose();
+            if (_statusTimer != null) _statusTimer.Stop();
+            Anim.Clear();
+            DisposeFadeBitmaps();
             SaveSettings();
             base.OnFormClosing(e);
+        }
+
+        /// <summary>崩溃兜底: 仅停引擎(触发各引擎 finally 松键), 不做任何 UI 操作, 不吞异常。</summary>
+        private void StopEnginesSilent()
+        {
+            try { _clicker.Stop(); } catch (Exception) { }
+            try { _spammer.Stop(); } catch (Exception) { }
+            try { _player.Stop(); } catch (Exception) { }
+            try { if (_recorder.Recording) _recorder.Stop(); } catch (Exception) { }
         }
     }
 }
