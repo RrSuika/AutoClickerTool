@@ -114,6 +114,30 @@ namespace AutoClickerTool
 
         public bool Available { get { return _ctx != IntPtr.Zero; } }
 
+        /// <summary>销毁驱动上下文; 进程退出时由系统兜底, 但显式销毁更干净(也避免句柄在懒加载竞态下泄漏)。</summary>
+        public void Dispose()
+        {
+            if (_ctx == IntPtr.Zero) return;
+            try
+            {
+                interception_destroy_context(_ctx);
+            }
+            catch (Exception)
+            {
+            }
+            _ctx = IntPtr.Zero;
+            GC.SuppressFinalize(this);
+        }
+
+        ~InterceptionDriver()
+        {
+            if (_ctx != IntPtr.Zero)
+            {
+                try { interception_destroy_context(_ctx); } catch (Exception) { }
+                _ctx = IntPtr.Zero;
+            }
+        }
+
         public void MoveAbsolute(int x, int y)
         {
             if (!Available) return;
@@ -153,7 +177,8 @@ namespace AutoClickerTool
         {
             if (!Available) return;
             ushort state = (ushort)(MOUSE_WHEEL | (delta > 0 ? MOUSE_WHEEL_UP : MOUSE_WHEEL_DOWN));
-            short rolling = (short)Math.Max(1, Math.Min(100, Math.Abs(delta) / 120));
+            // long 取绝对值: int.MinValue 会让 Math.Abs(int) 抛 OverflowException(恶意宏可构造)
+            short rolling = (short)Math.Max(1, Math.Min(100, (int)(Math.Abs((long)delta) / 120)));
             var s = new InterceptionMouseStroke { state = state, rolling = rolling, x = CursorX(), y = CursorY() };
             SendMouse(new[] { s });
         }

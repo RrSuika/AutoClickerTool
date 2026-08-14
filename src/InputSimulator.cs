@@ -27,16 +27,16 @@ namespace AutoClickerTool
     /// <summary>输入注入中枢: 鼠标/键盘事件按当前注入方式路由, 三种方式共用同一套调用入口。</summary>
     internal static class InputSimulator
     {
-        public static InjectionMethod Method = InjectionMethod.SendInput;
+        public static volatile InjectionMethod Method = InjectionMethod.SendInput;
 
         /// <summary>SendMessage 模式的目标窗口标题; 为空时取前台窗口。</summary>
-        public static string TargetWindowTitle = "";
+        public static volatile string TargetWindowTitle = "";
 
         /// <summary>SendInput 模式键盘事件使用扫描码注入(部分游戏校验扫描码)。</summary>
-        public static bool KeyboardScanCode = false;
+        public static volatile bool KeyboardScanCode = false;
 
         private static InterceptionDriver _driver;
-        private static bool _driverTried;
+        private static readonly object DriverLock = new object();
         private static int _lastTargetX;
         private static int _lastTargetY;
         private static bool _hasLastTarget;
@@ -283,8 +283,9 @@ namespace AutoClickerTool
             int vw = NativeMethods.GetSystemMetrics(NativeMethods.SM_CXVIRTUALSCREEN);
             int vh = NativeMethods.GetSystemMetrics(NativeMethods.SM_CYVIRTUALSCREEN);
             if (vw <= 1 || vh <= 1) return;
-            uint fx = (uint)(((x - vx) * 65535.0) / (vw - 1));
-            uint fy = (uint)(((y - vy) * 65535.0) / (vh - 1));
+            // 坐标先钳到虚拟屏原点再归一化: 负坐标(副屏在主屏左侧/上方)直接 uint 强转会得到错误值
+            uint fx = (uint)((Math.Max(0, x - vx) * 65535.0) / (vw - 1));
+            uint fy = (uint)((Math.Max(0, y - vy) * 65535.0) / (vh - 1));
             var input = new NativeMethods.INPUT { type = NativeMethods.INPUT_MOUSE };
             input.U.mi.dwFlags = NativeMethods.MOUSEEVENTF_MOVE | NativeMethods.MOUSEEVENTF_ABSOLUTE;
             input.U.mi.dx = unchecked((int)fx);
@@ -386,16 +387,39 @@ namespace AutoClickerTool
 
         // ---------- 驱动注入 ----------
 
-        /// <summary>惰性初始化驱动; 不可用时返回空壳驱动(所有操作静默跳过)。</summary>
+        /// <summary>惰性初始化驱动; 不可用时返回空壳驱动(所有操作静默跳过, 引擎不中断)。线程安全, DLL 晚些放入目录时自动重试。</summary>
         private static InterceptionDriver GetDriver()
         {
-            if (!_driverTried)
+            lock (DriverLock)
             {
-                _driverTried = true;
-                _driver = InterceptionDriver.Create();
+                if (_driver == null || !_driver.Available)
+                {
+                    InterceptionDriver d = InterceptionDriver.Create();
+                    if (d != null)
+                    {
+                        if (_driver != null) _driver.Dispose(); // 换掉旧空壳/旧上下文
+                        _driver = d;
+                    }
+                    else if (_driver == null)
+                    {
+                        _driver = new InterceptionDriver(); // 空壳兜底: _ctx 为 0, 所有操作静默跳过
+                    }
+                }
             }
-            if (_driver == null) _driver = InterceptionDriver.Create(); // DLL 晚些才放入目录时重试
             return _driver;
+        }
+
+        /// <summary>退出前销毁驱动上下文(释放句柄)。</summary>
+        public static void Shutdown()
+        {
+            lock (DriverLock)
+            {
+                if (_driver != null)
+                {
+                    _driver.Dispose();
+                    _driver = null;
+                }
+            }
         }
 
         // ---------- 映射 ----------

@@ -131,6 +131,7 @@ namespace AutoClickerTool
                 var cfg = ser.Deserialize<AppConfig>(File.ReadAllText(FilePath, Encoding.UTF8));
                 if (cfg == null) return Default();
                 Migrate(cfg);
+                SanitizeUntrusted(cfg);
                 return cfg;
             }
             catch (Exception ex)
@@ -175,13 +176,65 @@ namespace AutoClickerTool
                 string tmp = FilePath + ".tmp";
                 // 原子写: 先写临时文件再替换, 避免中途崩溃/断电损坏 config.json 导致设置全丢
                 File.WriteAllText(tmp, ser.Serialize(this), Encoding.UTF8);
-                if (File.Exists(FilePath)) File.Replace(tmp, FilePath, null);
+                if (File.Exists(FilePath))
+                {
+                    try
+                    {
+                        File.Replace(tmp, FilePath, null);
+                    }
+                    catch (Exception)
+                    {
+                        // FAT/exFAT 卷不支持 File.Replace, 回退为 删旧+改名(保证能保存)
+                        try { File.Delete(FilePath); } catch (Exception) { }
+                        File.Move(tmp, FilePath);
+                    }
+                }
                 else File.Move(tmp, FilePath);
             }
             catch (Exception)
             {
                 // 保存失败不致命(如程序目录只读), 静默忽略; 清理残留临时文件
                 try { if (File.Exists(FilePath + ".tmp")) File.Delete(FilePath + ".tmp"); } catch (Exception) { }
+            }
+        }
+
+        /// <summary>加载后收紧来自文件的外部数据(config 可能被手工/恶意编辑):
+        /// 软件控制程序白名单(防任意程序执行) + 音效绑定纯文件名校验(防路径穿越)。</summary>
+        private static void SanitizeUntrusted(AppConfig cfg)
+        {
+            if (cfg.LaunchPrograms == null) cfg.LaunchPrograms = new List<string>();
+            if (cfg.LaunchPrograms.Count > 0)
+            {
+                var keep = new List<string>();
+                foreach (string p in cfg.LaunchPrograms)
+                {
+                    if (string.IsNullOrEmpty(p)) continue;
+                    string ext = Path.GetExtension(p).ToLowerInvariant();
+                    bool ok = Path.IsPathRooted(p) && (ext == ".exe" || ext == ".lnk");
+                    if (ok) keep.Add(p);
+                    else Log.Warn("已丢弃白名单外的自动启动程序: " + p);
+                }
+                cfg.LaunchPrograms = keep;
+            }
+            SanitizeSfxDict(cfg.SfxBindings);
+            SanitizeSfxDict(cfg.SfxComboBindings);
+        }
+
+        /// <summary>音效绑定值必须是纯文件名(不含目录分隔符), 防止 config 路径穿越播放磁盘任意媒体文件。</summary>
+        private static void SanitizeSfxDict(Dictionary<string, string> dict)
+        {
+            if (dict == null || dict.Count == 0) return;
+            var bad = new List<string>();
+            foreach (var kv in dict)
+            {
+                string v = kv.Value;
+                bool ok = !string.IsNullOrEmpty(v) && v == Path.GetFileName(v) && v.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
+                if (!ok) bad.Add(kv.Key);
+            }
+            foreach (string k in bad)
+            {
+                Log.Warn("已丢弃非法的音效绑定: " + k + " -> " + dict[k]);
+                dict.Remove(k);
             }
         }
     }

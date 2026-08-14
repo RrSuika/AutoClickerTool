@@ -100,6 +100,38 @@ internal static class Tests
         Check(fresh.StartMinimized == false, "StartMinimized 默认关闭");
         Check(fresh.ConfigVersion == 0, "ConfigVersion 原始默认=0(经 Load 后迁移为 3)");
 
+        Console.WriteLine("== AppConfig 不可信数据清洗(安全) ==");
+        {
+            string path = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
+            try
+            {
+                var evil = new AppConfig();
+                evil.LaunchPrograms.Add("C:\\evil.bat");      // 白名单外(脚本)
+                evil.LaunchPrograms.Add("notepad.exe");       // 相对路径
+                evil.LaunchPrograms.Add("C:\\games\\game.exe"); // 合法
+                evil.LaunchPrograms.Add("C:\\games\\game.lnk"); // 合法
+                evil.SfxBindings["65"] = "..\\..\\Windows\\Media\\notify.wav"; // 路径穿越
+                evil.SfxBindings["66"] = "ok.wav";            // 纯文件名合法
+                System.IO.File.WriteAllText(path, ser.Serialize(evil));
+
+                string err;
+                var loaded = AppConfig.Load(out err);
+                Check(loaded != null, "清洗后配置可加载");
+                Check(loaded.LaunchPrograms.Count == 2
+                    && loaded.LaunchPrograms[0] == "C:\\games\\game.exe"
+                    && loaded.LaunchPrograms[1] == "C:\\games\\game.lnk",
+                    "LaunchPrograms 白名单: bat/相对路径被丢弃, exe/lnk 保留");
+                Check(!loaded.SfxBindings.ContainsKey("65") && loaded.SfxBindings["66"] == "ok.wav",
+                    "音效绑定路径穿越被丢弃, 纯文件名保留");
+                Check(loaded.ConfigVersion == 3, "经 Load 后 ConfigVersion 迁移为 3");
+            }
+            finally
+            {
+                try { System.IO.File.Delete(path); } catch (Exception) { }
+                try { System.IO.File.Delete(path + ".tmp"); } catch (Exception) { }
+            }
+        }
+
         Console.WriteLine();
         Console.WriteLine("===== " + _pass + " 通过, " + _fail + " 失败 =====");
         return _fail == 0 ? 0 : 1;

@@ -17,9 +17,9 @@ namespace AutoClickerTool
         // 开关由 UI 线程写、引擎线程读, 用 volatile 保证可见性(布尔读写本身原子)
         public static volatile bool Enabled = true;              // 总开关
         public static volatile bool TimingEnabled = true;        // 间隔随机化开关
-        public static int TimingJitterPct = 15;         // 间隔 ±N%
+        public static volatile int TimingJitterPct = 15;         // 间隔 ±N%
         public static volatile bool PositionEnabled = true;      // 固定坐标抖动开关
-        public static int PositionJitterPx = 2;         // ±N 像素
+        public static volatile int PositionJitterPx = 2;         // ±N 像素
         public static volatile bool PressDurationEnabled = true; // 按键时长随机化开关
         public static volatile bool TrajectoryEnabled = true;    // 移动轨迹开关(关闭则瞬移)
 

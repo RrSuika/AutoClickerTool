@@ -34,10 +34,11 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 |---|---|
 | [Program.cs](../src/Program.cs) | 入口：`EnablePerMonitorDpiAware()`（PMv2 感知，失败回退系统感知）+ 启动 MainForm |
 | [MainForm.cs](../src/MainForm.cs) | **主界面（~1600 行，最大文件）**：6 个胶囊标签页、配置加载/保存、事件列表虚拟模式渲染、各引擎开关的桥接、DPI 同步（SyncDpi）、DWM 边框主题 |
-| [Clay.cs](../src/Clay.cs) | **自绘控件库**：`Dpi` 缩放、`Clay` 绘制工具（圆角/阴影/渐变）、`ClayKit.InputShell`、`ClayButton`、`ClayCheck`、`ClayRadio`、`ClayGroup`、`ClayPanel`、`ClayNumericUpDown`（自绘▲▼）、`ClayComboBox`（OwnerDraw 自绘下拉）、`ClaySlider`（主题滑块）、`ClayMenuColorTable`/`ClayMenu`（主题右键菜单） |
+| [Clay.cs](../src/Clay.cs) | **自绘控件库**：`Dpi` 缩放、`Clay` 绘制工具（圆角/阴影/渐变）、`ClayKit.InputShell`、`ClayButton`（**文字放不下自动缩字号** FitFont，下限 7pt 后 EndEllipsis）、`ClayCheck`、`ClayRadio`、`ClayGroup`、`ClayPanel`、`ClayNumericUpDown`（自绘▲▼）、`ClayComboBox`（OwnerDraw 自绘下拉）、`ClaySlider`（主题滑块）、`ClayMenuColorTable`/`ClayMenu`（主题右键菜单） |
 | [Theme.cs](../src/Theme.cs) | 6 套主题调色板 + 风格参数（Dark/Glow/Bevel/Radius）。`Theme.Current` 全局单例，控件 OnPaint 实时读取实现换肤 |
 | [Anim.cs](../src/Anim.cs) | **轻量动效引擎**：单个全局 Timer(16ms) 驱动，指数平滑逼近目标值（可中断/可重定向，等效可中断的 ease-out transition）；`Anim.To(setValue, current, target, tauMs)`；`EaseOutCubic`/`EaseInOutCubic`；`Anim.Enabled=false` 时全部瞬时（等效 prefers-reduced-motion）。空闲自动停 Timer |
-| [Log.cs](../src/Log.cs) | **文件日志**：写 exe 同目录 `log.txt`，`Log.Info/Warn/Error`，线程安全，超 2MB 自动轮转；写失败静默忽略 |
+| [Log.cs](../src/Log.cs) | **文件日志**：写 exe 同目录 `log.txt`，`Log.Info/Warn/Error`，**异步缓冲写入**(不阻塞钩子回调，消息中 `\r\n` 转义防行注入)，超 2MB 轮转 rename 成 `log.txt.old`；退出前调 `Log.Flush()` 落盘；写失败静默忽略 |
+| [Util.cs](../src/Util.cs) | 共享小工具：`SleepInterruptible(ms, alive)` 可中断分段休眠(三引擎共用，新文件需在 build.bat 编译列表中) |
 | [VersionInfo.cs](../src/VersionInfo.cs) | **集中版本号**（`Version` 常量）：窗口标题/关于/状态栏/日志/发布脚本共用，改版只改这里 |
 | [Lang.cs](../src/Lang.cs) | 双语字典：以**英文原文为 key**，`Lang.T(key)` 按 `Lang.Code`("zh"/"en") 翻译；控件 `Name` 属性存英文原文，语言切换时 `ApplyLangWalk` 按 Name 递归刷新 |
 | [InputSimulator.cs](../src/InputSimulator.cs) | **输入注入中枢**：鼠标/键盘事件按 `Method` 路由到 SendInput/SendMessage/InterceptionDriver。MoveTo 内部按拟人化走贝塞尔轨迹；Click 含按下-抬起微拖 |
@@ -45,9 +46,9 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 | [InterceptionDriver.cs](../src/InterceptionDriver.cs) | Interception 驱动加载（DLL 迟到重试、空壳兜底） |
 | [HotkeyManager.cs](../src/HotkeyManager.cs) | **全局热键引擎**：键盘+鼠标低级钩子监听，`Hotkey`（修饰键+触发键集合，多键组合）解析/显示/冲突检测。`GetName` 含左右修饰键精确名与媒体键名 |
 | [MacroRecorder.cs](../src/MacroRecorder.cs) | **宏录制器**：低级钩子录全局操作。**按键精灵式合并**：连续移动合并为一条"移动到终点"(500ms 停顿阈值)；短按(≤250ms)合并为单击/按键事件；长按保留按下/抬起 |
-| [MacroPlayer.cs](../src/MacroPlayer.cs) | 宏回放线程：按 DelayMs 分段 sleep 后 PlayEvent，支持倍速/循环；Move 事件的轨迹移动从延迟预算中扣除时间 |
-| [AutoClicker.cs](../src/AutoClicker.cs) | 鼠标连点引擎（后台线程循环） |
-| [KeyboardSpammer.cs](../src/KeyboardSpammer.cs) | 键盘连按引擎（Tap/Hold 两模式） |
+| [MacroPlayer.cs](../src/MacroPlayer.cs) | 宏回放线程：按 DelayMs 分段 sleep 后 PlayEvent，支持倍速/循环；Move 事件的轨迹移动从延迟预算中扣除时间；**按住状态是 `Run()` 局部 HeldState**(停止时 finally 补发全部抬起)；「运行到时刻」跨天判定(目标时刻已过=次日)；**代际计数防 Stop→Start 竞态** |
+| [AutoClicker.cs](../src/AutoClicker.cs) | 鼠标连点引擎（后台线程循环，代际计数防竞态） |
+| [KeyboardSpammer.cs](../src/KeyboardSpammer.cs) | 键盘连按引擎（Tap/Hold 两模式，代际计数防竞态） |
 | [SoundFx.cs](../src/SoundFx.cs) | 按键音效：`SfxPlayer`（MCI 播放 wav/mp3，覆盖式：新播放前 stop+close 旧音效）+ `SfxManager`（键盘钩子按绑定表触发，只监听不拦截，过滤注入按键） |
 | [AppConfig.cs](../src/AppConfig.cs) | 配置模型（JavaScriptSerializer 序列化到 `config.json`）+ `MacrosDir`/`SoundsDir` 目录常量与 `EnsureDataDirs()` |
 | [AutoStart.cs](../src/AutoStart.cs) | **开机自启动**：`IsEnabled()`/`SetEnabled(bool)` 写/删 `HKCU\...\CurrentVersion\Run` 的 `AutoClickerTool` 值（值=带引号 exe 路径，失败静默） |
@@ -75,6 +76,7 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 - 文本往返：`Hotkey.Parse("Ctrl+Shift+K")` ↔ `ToString()`，双向兼容（显示名如"鼠标X1"、"音量+"也可反解析）
 - `HotkeyManager`：两个低级钩子维护 `_pressed` 集合，新按下的键补全某组合时 `TryFire`（按住期间只触发一次）。只响应非注入输入
 - 录制时 `IsHotkeyKey(vk)` 过滤：vk 出现在任何绑定的 Keys 里就不录
+- **回放期间抑制自触发**：Interception 驱动注入无 INJECTED 标记，`MacroPlayer` 运行时 MainForm 置 `HotkeyManager.Suppress`/`SfxManager.Suppress`，回放结束(Finished)恢复；「全部停止」热键例外始终可用，保证驱动模式下也能停掉回放
 
 ### 4.3 三套注入方式（Advanced 页切换）
 | 方式 | 原理 | 适用 |
@@ -89,7 +91,7 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 - 高级设置页的总开关控制子项 Enabled 状态（`UpdateHumanizeChildState`）
 
 ### 4.5 按键音效
-- 绑定表存 config：单键 `SfxBindings: Dictionary<string,string>`(键码字符串→文件名) + `SfxBindingVolumes: Dictionary<string,int>`(键码字符串→音量 0~100)——**键必须用字符串**，见坑 13；组合键 `SfxComboBindings: Dictionary<string,string>`(组合串如 "Ctrl+C"→文件名) + `SfxComboVolumes`(组合串→音量)。`SfxManager` 全局键盘钩子监听（**只监听不拦截**，与热键/录制并行），维护 `_down` 归一化按下集合：单键命中 `Bindings` 即播，组合键 `Satisfied()`(所有修饰键+键都按住)即播 → `SfxPlayer.Play(path, volume)`（MCI：新播放前 stop+close 旧的 = 覆盖式，`setaudio <alias> volume to N`，waveaudio 支持、mpegvideo 不支持静默忽略）。过滤注入按键（宏回放不触发音效）
+- 绑定表存 config：单键 `SfxBindings: Dictionary<string,string>`(键码字符串→文件名) + `SfxBindingVolumes: Dictionary<string,int>`(键码字符串→音量 0~100)——**键必须用字符串**，见坑 13；组合键 `SfxComboBindings: Dictionary<string,string>`(组合串如 "Ctrl+C"→文件名) + `SfxComboVolumes`(组合串→音量)。`SfxManager` 全局键盘钩子监听（**只监听不拦截**，与热键/录制并行），维护 `_down` 归一化按下集合：单键命中 `Bindings` 即播，组合键 `Satisfied()`(所有修饰键+键都按住)即播。**钩子回调只入队**（`Enqueue` 只保留最新一条保持覆盖式语义），后台线程执行 `SfxPlayer.Play(path, volume)`（MCI：新播放前 stop+close 旧的 = 覆盖式，`setaudio <alias> volume to N`，waveaudio 支持、mpegvideo 不支持静默忽略）。过滤注入按键（宏回放不触发音效）；回放期间 `Suppress` 抑制
 - 音效页：总开关 + **全局音量滑块**（`sldGlobalVolume` 0~100 → `SfxVolume`）+ **选中项音量滑块**（`sldKeyVolume`，选中列表项后单独覆盖全局）+ 添加绑定（复用 HotkeyCaptureForm 捕获**单键或组合键**）+ 删除/试听/打开 Sounds 文件夹。统一列表用内部 `SfxKey` 条目(单键/组合键)填充；滑块是自绘 `ClaySlider`（不用系统原生 TrackBar）。`SfxEnabled` 默认**开启**（新安装即生效；老配置保留已存值）
 
 ### 4.6 主题系统
@@ -111,6 +113,7 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 
 ### 4.8 配置
 - `AppConfig` 字段即 config.json 结构；界面改动即时 `SaveSettings()`（从控件读值 → 写 `_cfg` → Save）
+- **加载时清洗不可信数据**：`SanitizeUntrusted` 白名单 `LaunchPrograms`(绝对路径+exe/lnk) 与音效绑定纯文件名校验（见坑 19）
 - 启动流程：`Load` → 按语言/主题构建 UI → `ApplyConfigToUi` 回填（`_applying` 标志抑制控件事件）→ `PushToEngines` 把注入/拟人化设置同步到各静态引擎
 - **新增配置项**：AppConfig 加字段 + ApplyConfigToUi 回填 + SaveSettings 同步 + PushToEngines 转给引擎（按需），缺一不可
 
@@ -132,8 +135,8 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 
 ## 6. 常见坑
 
-1. **钩子回调必须快**：LL 钩子超时会被系统摘除，回调里只做轻量操作（录制/触发/播音效）；重活（弹窗等）用 `BeginInvoke` 或事件转 UI 线程（`Ui()` helper 封装 InvokeRequired）
-2. **模拟输入会触发自己的钩子**：靠 INJECTED 标记过滤，新增注入路径时确保 SendInput/PostMessage 都带标记或不经过钩子
+1. **钩子回调必须快**：LL 钩子超时会被系统摘除，回调里只做轻量操作（录制/触发/入队）；重活（弹窗等）用 `BeginInvoke` 或事件转 UI 线程（`Ui()` helper 封装 InvokeRequired）。**现状**：音效 MCI 播放已移入后台队列（`SfxManager.Enqueue`→ThreadPool，只保留最新一条保持覆盖式语义）；日志为异步缓冲写入；三个钩子回调整体 try/catch 兜底（托管异常穿越原生边界会终止进程）
+2. **模拟输入会触发自己的钩子**：靠 INJECTED 标记过滤，新增注入路径时确保 SendInput/PostMessage 都带标记或不经过钩子。**例外**：Interception 驱动注入无 INJECTED 标记，回放期间靠 `Suppress` 抑制（见 4.2）；`HotkeyCaptureForm` 同样过滤注入按键/点击，并忽略落在对话框自身范围内的鼠标点击（否则打开对话框点一下就把"鼠标左键"录成热键）
 3. **ClayNumericUpDown 的内部子控件**：框架会创建 `UpDownButtons`/`UpDownEdit` 两个子控件（顺序因框架版本而异）。**只隐藏 `UpDownButtons`**（否则系统按钮拦截右侧 ▲▼ 区域点击）；**保留 `UpDownEdit` 并样式化**（`Visible=true`、`BorderStyle=None`、`BackColor=InputBg`、`ForeColor=Ink`，`LayoutEdit()` 把它定位到文字区左侧）——这样数值输入框能**点击后键盘直接输入数字**（OnPaint 不再手动画数值文本，交给编辑框显示）。若再次隐藏 `UpDownEdit` 会导致无法键盘输入
 4. **NumericUpDown.Height 会被框架钳制**到字体首选高度（约 23~24px），InputShell 里设置的高度可能不生效——布局按实际高度居中即可
 5. **多线程共享 Random**：Humanizer 全部随机数在 `lock(Lock)` 内生成（多个引擎线程并发调用）
@@ -148,7 +151,10 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 14. **隐藏页控件没有窗口句柄**：只有当前可见页的控件会被创建句柄；`EnumChildWindows` 查不到隐藏页控件属正常现象（WinForms 懒创建句柄）。需要操作隐藏页控件时先切换页面或访问其属性触发 `CreateControl`
 15. **给自绘控件加动效**：控件存一个 `float` 字段（如 `_hoverT`）+ **一个稳定的 `Action<float>` 委托字段**（构造函数里初始化成 `v => { _hoverT = v; Invalidate(); }`），事件里调 `Anim.To(委托, 当前值, 目标值, tauMs)`，OnPaint 用 `Anim.EaseOutCubic(_hoverT)` 做颜色/透明度插值。**委托必须存字段（同一实例），否则 Anim 无法去重、会累积重复动画条目**；`Anim.Enabled=false` 时 `Anim.To` 直接瞬达目标（等效减少动态效果）。tau 参考：悬停 70~100ms、按压 50~100ms、标签过渡 120ms、勾选 110ms（全部 <300ms 符合 UI 动效规范）。**DPI 重建/换主题 `Controls.Clear()` 会销毁旧控件——重建前必须 `Anim.Clear()`**，Anim.Tick 内部也捕获回调异常（控件已销毁时停止该动画），否则动画回调会访问已销毁控件崩溃
 16. **Interception 驱动的过滤器必须 try/finally 复位**：`interception_set_filter(ALL)→send→set_filter(NONE)` 若 send 抛异常而过滤器未复位，驱动会把**整机键盘/鼠标输入全部拦截**（用户键鼠失效）。`SendKey`/`SendMouse` 里 send 必须包在 try 里、复位在 finally 里
-17. **回放停止时按住键要补发抬起**：`MacroPlayer` 回放中 `LeftDown/KeyDown/KeyComboDown` 后若未到对应 `Up` 事件就停止，键会卡住。`MacroPlayer` 维护 `_heldBtn/_heldKeyVk/_heldCombo`，在 `Run()` 的 `finally` 里 `ReleaseHeld()` 补发抬起；同理 `KeyboardSpammer` Hold 模式已在 finally 松开
+17. **回放停止时按住键要补发抬起**：`MacroPlayer` 回放中 `LeftDown/KeyDown/KeyComboDown` 后若未到对应 `Up` 事件就停止，键会卡住。按住状态是 **`Run()` 局部 HeldState**（`ReleaseHeld(held)` 在 finally 补发抬起）——线程局部化后旧代线程不会干扰新代按键；同理 `KeyboardSpammer` Hold 模式已在 finally 松开
+18. **引擎 Stop→Start 竞态**：三个引擎用**代际计数**防双线程并发——`Stop()` 置 flag 并自增 `_gen`，线程创建时绑定当时的代际，循环内 `Alive(gen)` 同时比对 flag 与代际，finally 里只有当前代际的线程才清 flag/触发事件。退出时 `Shutdown()` 调 `WaitExit(500)`（超时 Abort，确保 finally 已执行）再结束进程
+19. **config.json 是不可信输入**：`AppConfig.Load` 里 `SanitizeUntrusted` 清洗——`LaunchPrograms` 只保留绝对路径且扩展名为 exe/lnk（bat/cmd/URL 丢弃并 Log.Warn）；音效绑定值必须等于 `Path.GetFileName(v)`（防 `..\` 路径穿越）。「软件控制」的 AddProgram 对话框只允许 exe/lnk，`LaunchPrograms()` 运行时二次校验白名单
+20. **标签条与按钮文字宽度**：标签条 `LayoutTabStrip()` 按当前语言文本测量所需宽度等比分配（构建与 `ApplyLanguage` 时调用；构建期条宽未布局时用 546 兜底）；`ClayButton` 文字放不下自动缩字号（下限 7pt）。新增按钮时无需手工计算文字宽度
 
 ## 7. 验证流程
 

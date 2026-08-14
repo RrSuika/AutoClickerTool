@@ -62,7 +62,8 @@ namespace AutoClickerTool
         private IntPtr _mouseHook;
         private IntPtr _keyboardHook;
         private Stopwatch _sw;
-        private readonly Stopwatch _holdSw = new Stopwatch(); // 最近一次按下的时长计时
+        private readonly Stopwatch _holdSwBtn = new Stopwatch(); // 最近一次鼠标按下的时长计时
+        private readonly Stopwatch _holdSwKey = new Stopwatch(); // 最近一次键盘按下的时长计时(分开计时, 避免互相重置误判长按)
         private int _pendBtn = -1;   // 最近按下未抬起的鼠标键: 0左 1右 2中, -1 无
         private int _pendKey;        // 最近按下未抬起的键盘键 vk
         private bool _disposed;
@@ -143,8 +144,9 @@ namespace AutoClickerTool
         {
             int k = (int)e.Kind;
             if (k < 0 || k > 17) e.Kind = MacroEventKind.Delay;
-            if (e.X < 0) e.X = 0;
-            if (e.Y < 0) e.Y = 0;
+            // 允许负坐标: 副屏在主屏左侧/上方时系统坐标为负, 钳 0 会让回放全部指向主屏左上角
+            if (e.X < -32768) e.X = -32768;
+            if (e.Y < -32768) e.Y = -32768;
             if (e.X > 32767) e.X = 32767;
             if (e.Y > 32767) e.Y = 32767;
             if (e.DelayMs < 0) e.DelayMs = 0;
@@ -228,11 +230,11 @@ namespace AutoClickerTool
             if (down)
             {
                 _pendBtn = btn;
-                _holdSw.Restart();
+                _holdSwBtn.Restart();
                 Record(downKind, x, y, 0);
                 return;
             }
-            long held = _holdSw.ElapsedMilliseconds;
+            long held = _holdSwBtn.ElapsedMilliseconds;
             bool merged = _pendBtn == btn && held >= 0 && held <= TapMergeMaxMs;
             if (merged && _events.Count > 0)
             {
@@ -279,11 +281,11 @@ namespace AutoClickerTool
             {
                 if (_pendKey == vk) return; // 按住时的自动重复消息, 只录第一次按下
                 _pendKey = vk;
-                _holdSw.Restart();
+                _holdSwKey.Restart();
                 Record(MacroEventKind.KeyDown, 0, 0, vk);
                 return;
             }
-            long held = _holdSw.ElapsedMilliseconds;
+            long held = _holdSwKey.ElapsedMilliseconds;
             bool merged = _pendKey == vk && held >= 0 && held <= TapMergeMaxMs;
             if (merged && _events.Count > 0)
             {

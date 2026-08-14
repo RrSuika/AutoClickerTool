@@ -302,7 +302,7 @@ namespace AutoClickerTool
         private bool _disposed;
 
         /// <summary>捕获新热键期间置 true, 暂停触发动作。</summary>
-        public volatile bool Suppress;
+        public volatile bool Suppress = false;
 
         public HotkeyManager()
         {
@@ -341,7 +341,7 @@ namespace AutoClickerTool
         public string Describe(HotkeyAction action)
         {
             var hk = GetBinding(action);
-            return hk == null ? "(未设置)" : hk.ToString();
+            return hk == null ? Lang.T("(unset)") : hk.ToString();
         }
 
         /// <summary>检查新热键与其它功能是否冲突, 返回冲突的功能。</summary>
@@ -377,6 +377,13 @@ namespace AutoClickerTool
                 NativeMethods.GetModuleHandle(null), 0);
             _mouseHook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_MOUSE_LL, _mouseProc,
                 NativeMethods.GetModuleHandle(null), 0);
+            if (_kbHook == IntPtr.Zero || _mouseHook == IntPtr.Zero)
+            {
+                // 部分失败: 回滚已装钩子并清零, 允许下次重试(否则鼠标热键永久失效且无提示)
+                Log.Warn("热键钩子安装失败(kb=" + (_kbHook != IntPtr.Zero) + ", mouse=" + (_mouseHook != IntPtr.Zero) + ")");
+                if (_kbHook != IntPtr.Zero) { NativeMethods.UnhookWindowsHookEx(_kbHook); _kbHook = IntPtr.Zero; }
+                if (_mouseHook != IntPtr.Zero) { NativeMethods.UnhookWindowsHookEx(_mouseHook); _mouseHook = IntPtr.Zero; }
+            }
         }
 
         private void Fire(HotkeyAction action)
@@ -403,7 +410,9 @@ namespace AutoClickerTool
                 if (Satisfied(hk))
                 {
                     _fired.Add(kv.Key);
-                    if (!Suppress) Fire(kv.Key);
+                    // 回放期间抑制(驱动级注入自触发), 但"全部停止"始终可用, 保证驱动模式下也能停掉回放
+                    if (Suppress && kv.Key != HotkeyAction.StopAll) continue;
+                    Fire(kv.Key);
                 }
             }
         }

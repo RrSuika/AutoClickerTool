@@ -76,18 +76,31 @@ namespace AutoClickerTool
     /// <summary>
     /// 按键音效管理器: 全局键盘钩子监听按键, 按下已绑定的键或组合键时播放对应音效。
     /// 只监听不拦截, 与热键/录制钩子互不干扰; 忽略注入按键(宏回放不会触发音效)。
+    /// 钩子回调只做入队(MCI 打开/播放是磁盘 I/O, 移出回调防止 UI 卡顿与钩子超时被系统摘除)。
     /// </summary>
     internal class SfxManager : IDisposable
     {
         private const int LLKHF_INJECTED = 0x10;
 
+        private sealed class SfxJob
+        {
+            public string Path;
+            public int Volume;
+        }
+
         private readonly NativeMethods.LowLevelProc _kbProc;
         private IntPtr _kbHook;
         private readonly HashSet<uint> _down = new HashSet<uint>(); // 当前按住的键(归一化)
+        private readonly Queue<SfxJob> _jobs = new Queue<SfxJob>();
+        private readonly object _qLock = new object();
+        private bool _pumpRunning;
         private bool _disposed;
 
         /// <summary>总开关。</summary>
         public volatile bool Enabled;
+
+        /// <summary>回放期间抑制: 驱动级注入没有 INJECTED 标记, 防止回放触发自己的音效。</summary>
+        public volatile bool Suppress;
 
         /// <summary>键码(原始, 可区分左右修饰键) → 音效文件绝对路径。</summary>
         public Dictionary<int, string> Bindings = new Dictionary<int, string>();
@@ -108,6 +121,7 @@ namespace AutoClickerTool
             if (_kbHook != IntPtr.Zero || _disposed) return;
             _kbHook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_KEYBOARD_LL, _kbProc,
                 NativeMethods.GetModuleHandle(null), 0);
+            if (_kbHook == IntPtr.Zero) Log.Warn("音效钩子安装失败");
         }
 
         private bool Satisfied(Hotkey hk)
@@ -118,40 +132,82 @@ namespace AutoClickerTool
             return true;
         }
 
+        private void Enqueue(string path, int volume)
+        {
+            lock (_qLock)
+            {
+                while (_jobs.Count > 0) _jobs.Dequeue(); // 只保留最新一条, 保持"新键覆盖旧音效"
+                _jobs.Enqueue(new SfxJob { Path = path, Volume = volume });
+                if (_pumpRunning) return;
+                _pumpRunning = true;
+            }
+            ThreadPool.QueueUserWorkItem(Pump);
+        }
+
+        /// <summary>后台线程串行播放队列(与 SfxPlayer 的锁一起串行化 MCI 调用)。</summary>
+        private void Pump(object state)
+        {
+            try
+            {
+                while (true)
+                {
+                    SfxJob job = null;
+                    lock (_qLock)
+                    {
+                        if (_jobs.Count == 0) { _pumpRunning = false; return; }
+                        job = _jobs.Dequeue();
+                    }
+                    if (job != null) SfxPlayer.Play(job.Path, job.Volume);
+                }
+            }
+            catch (Exception ex)
+            {
+                try { Log.Warn("音效播放队列异常: " + ex.Message); } catch (Exception) { }
+            }
+        }
+
         private IntPtr KeyboardProc(int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if (nCode >= 0 && Enabled)
+            try
             {
-                var info = (NativeMethods.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.KBDLLHOOKSTRUCT));
-                bool up = (int)wParam == NativeMethods.WM_KEYUP || (int)wParam == NativeMethods.WM_SYSKEYUP;
-                uint vk = info.vkCode;
-                uint n = Hotkey.Normalize(vk);
-                if (up)
+                if (nCode >= 0 && Enabled && !Suppress)
                 {
-                    _down.Remove(n);
-                }
-                else if ((info.flags & LLKHF_INJECTED) == 0) // 忽略注入按键, 防止宏回放触发音效
-                {
-                    if (_down.Add(n)) // 按住自动重复的消息不重复触发
+                    var info = (NativeMethods.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.KBDLLHOOKSTRUCT));
+                    bool up = (int)wParam == NativeMethods.WM_KEYUP || (int)wParam == NativeMethods.WM_SYSKEYUP;
+                    uint vk = info.vkCode;
+                    uint n = Hotkey.Normalize(vk);
+                    if (up)
                     {
-                        string file;
-                        if (Bindings.TryGetValue((int)vk, out file))
+                        _down.Remove(n);
+                    }
+                    else if ((info.flags & LLKHF_INJECTED) == 0) // 忽略注入按键, 防止宏回放触发音效
+                    {
+                        if (_down.Add(n)) // 按住自动重复的消息不重复触发
                         {
-                            int vol;
-                            if (!Volumes.TryGetValue((int)vk, out vol)) vol = 1000;
-                            SfxPlayer.Play(file, vol);
-                        }
-                        // 组合键: 刚按下的键是组合的触发键之一, 且所有修饰键/键都已按住
-                        foreach (var cb in Combos)
-                        {
-                            if (cb.Combo != null && cb.Combo.Keys.Contains(n) && Satisfied(cb.Combo))
+                            string file;
+                            if (Bindings.TryGetValue((int)vk, out file))
                             {
-                                SfxPlayer.Play(cb.Path, cb.Volume);
-                                break;
+                                int vol;
+                                if (!Volumes.TryGetValue((int)vk, out vol)) vol = 1000;
+                                Enqueue(file, vol);
+                            }
+                            // 组合键: 刚按下的键是组合的触发键之一, 且所有修饰键/键都已按住
+                            foreach (var cb in Combos)
+                            {
+                                if (cb.Combo != null && cb.Combo.Keys.Contains(n) && Satisfied(cb.Combo))
+                                {
+                                    Enqueue(cb.Path, cb.Volume);
+                                    break;
+                                }
                             }
                         }
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                // 回调异常不能穿越原生边界(进程会终止), 兜底吞掉
+                try { Log.Warn("音效钩子回调异常: " + ex.Message); } catch (Exception) { }
             }
             return NativeMethods.CallNextHookEx(_kbHook, nCode, wParam, lParam);
         }

@@ -258,6 +258,8 @@ namespace AutoClickerTool
             d["Restored default hotkeys and saved"] = "已恢复默认热键并保存";
             d["Restore default hotkeys (F6~F9/F12) ?"] = "恢复默认热键 (F6~F9/F12) ?";
             d["(unset)"] = "(未设置)";
+            d["Only exe and lnk files are allowed"] = "仅允许 exe 和 lnk 文件";
+            d["Test failed: {0}"] = "测试失败: {0}";
 
             // 高级设置页
             d["Injection method (switch when a game blocks clicking)"] = "注入方式(游戏屏蔽自动点击时换用)";
@@ -364,7 +366,6 @@ namespace AutoClickerTool
             d["Delete event"] = "删除事件";
             d["Delete this event?"] = "确定删除该事件?";
             d["No event to edit"] = "没有可编辑的事件";
-            d["Playing... press {0} to stop"] = "正在回放... 按 {0} 停止";
 
             // 捕获对话框
             d["Set hotkey"] = "设置热键";

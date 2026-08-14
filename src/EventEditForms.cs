@@ -332,7 +332,7 @@ namespace AutoClickerTool
                 ForeColor = Clay.InkSoft,
                 BackColor = Clay.CardBg
             });
-            _txt = new TextBox { Text = initial ?? "", Location = new Point(Dpi.X(16), Dpi.X(38)), Width = Dpi.X(268), MaxLength = 80 };
+            _txt = new TextBox { Text = initial != null ? initial : "", Location = new Point(Dpi.X(16), Dpi.X(38)), Width = Dpi.X(268), MaxLength = 80 };
             card.Controls.Add(_txt);
             var ok = new ClayButton
             {

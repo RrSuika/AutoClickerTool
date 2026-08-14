@@ -45,7 +45,7 @@ namespace AutoClickerTool
             var card = new ClayPanel { Location = new Point(Dpi.X(10), Dpi.X(10)), Size = new Size(Dpi.X(400), Dpi.X(130)), BackColor = Clay.CardBg };
             _lbl = new Label
             {
-                Text = hint ?? Lang.T("Press the new hotkey combo...\r\nSupports Ctrl/Alt/Shift/Win + any key, multi-key combos, mouse side buttons\r\nRelease all keys to finish, Esc to cancel"),
+                Text = hint != null ? hint : Lang.T("Press the new hotkey combo...\r\nSupports Ctrl/Alt/Shift/Win + any key, multi-key combos, mouse side buttons\r\nRelease all keys to finish, Esc to cancel"),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Clay.Ink,
@@ -77,6 +77,8 @@ namespace AutoClickerTool
             if (nCode >= 0)
             {
                 var info = (NativeMethods.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.KBDLLHOOKSTRUCT));
+                if ((info.flags & 0x10) != 0) // 忽略注入按键(引擎/回放产生的输入不能混进捕获)
+                    return NativeMethods.CallNextHookEx(_kbHook, nCode, wParam, lParam);
                 uint raw = info.vkCode;
                 bool up = (int)wParam == NativeMethods.WM_KEYUP || (int)wParam == NativeMethods.WM_SYSKEYUP;
                 if (up)
@@ -115,6 +117,8 @@ namespace AutoClickerTool
             if (nCode >= 0)
             {
                 var info = (NativeMethods.MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.MSLLHOOKSTRUCT));
+                if ((info.flags & 0x01) != 0) // 忽略注入点击
+                    return NativeMethods.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
                 uint vk = 0;
                 bool up = false;
                 switch ((int)wParam)
@@ -130,6 +134,9 @@ namespace AutoClickerTool
                 }
                 if (vk != 0)
                 {
+                    // 点击落在本对话框内时忽略: 那只是操作对话框本身, 不是要绑定鼠标键
+                    if (Bounds.Contains(info.pt.x, info.pt.y))
+                        return NativeMethods.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
                     if (up)
                     {
                         _held.Remove(vk);
