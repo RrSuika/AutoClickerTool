@@ -398,15 +398,14 @@ namespace AutoClickerTool
         private void BuildTabStrip()
         {
             string[] tabNames = { Lang.T("Mouse Clicking"), Lang.T("Keyboard Spam"), Lang.T("Record & Play"), Lang.T("Hotkeys"), Lang.T("Advanced"), Lang.T("Sound FX"), Lang.T("Macro Library") };
-            int[] tabWidths = { 78, 78, 78, 56, 78, 64, 78 };
             _tabBtns = new Button[tabNames.Length];
             for (int i = 0; i < tabNames.Length; i++)
             {
                 var b = new ClayButton
                 {
                     Text = tabNames[i],
-                    Location = new Point(Dpi.X(10 + i * 78), Dpi.X(3)),
-                    Size = new Size(Dpi.X(tabWidths[i]), Dpi.X(28)),
+                    Location = new Point(Dpi.X(10), Dpi.X(3)),
+                    Size = new Size(Dpi.X(78), Dpi.X(28)),
                     Tab = true,
                     Selected = i == 0,
                     ForeColor = Clay.Ink
@@ -415,6 +414,42 @@ namespace AutoClickerTool
                 b.Click += delegate { SelectTab(idx); };
                 _tabStrip.Controls.Add(b);
                 _tabBtns[i] = b;
+            }
+            LayoutTabStrip();
+        }
+
+        /// <summary>按当前语言文本测量各标签所需宽度并等比分配条宽: 中文与原来接近, 英文文案较长时整体压缩而非截断。</summary>
+        private void LayoutTabStrip()
+        {
+            if (_tabBtns == null || _tabBtns.Length == 0) return;
+            string[] names = { Lang.T("Mouse Clicking"), Lang.T("Keyboard Spam"), Lang.T("Record & Play"), Lang.T("Hotkeys"), Lang.T("Advanced"), Lang.T("Sound FX"), Lang.T("Macro Library") };
+            int n = names.Length;
+            int min = Dpi.X(48);
+            int avail = _tabStrip.Width - Dpi.X(20);
+            if (avail < Dpi.X(546)) avail = Dpi.X(546); // 构建期条宽未布局时为 0, 用默认窗口宽度兜底
+            if (avail < min * n) avail = min * n;
+            int[] nat = new int[n];
+            int total = 0;
+            for (int i = 0; i < n; i++)
+            {
+                nat[i] = TextRenderer.MeasureText(names[i], _tabBtns[i].Font).Width + Dpi.X(16);
+                total += nat[i];
+            }
+            int x = Dpi.X(10);
+            int used = 0;
+            for (int i = 0; i < n; i++)
+            {
+                _tabBtns[i].Text = names[i];
+                int w = nat[i];
+                if (total > avail)
+                {
+                    w = nat[i] * avail / total;
+                    if (w < min) w = min;
+                }
+                if (i == n - 1) w = avail - used; // 最后一块吃掉余量, 总宽恰好铺满
+                _tabBtns[i].SetBounds(x, Dpi.X(3), w, Dpi.X(28));
+                x += w;
+                used += w;
             }
         }
 
@@ -437,7 +472,7 @@ namespace AutoClickerTool
                 Name = "About",
                 Text = Lang.T("About"),
                 Location = new Point(Dpi.X(320), Dpi.X(1)),
-                Size = new Size(Dpi.X(48), Dpi.X(24)),
+                Size = new Size(Dpi.X(55), Dpi.X(24)),
                 BackColor = Theme.Current.StatusBg
             };
             _statusBar.Controls.Add(btnAbout);
@@ -583,7 +618,7 @@ namespace AutoClickerTool
             numY = new ClayNumericUpDown { Minimum = 0, Maximum = 20000, Value = 0, BorderStyle = BorderStyle.None };
             gb.Controls.Add(ClayKit.InputShell(numX, 105, 90, 70));
             gb.Controls.Add(ClayKit.InputShell(numY, 195, 90, 70));
-            btnGetPos = new ClayButton { Name = "Get mouse position", Text = Lang.T("Get mouse position"), Location = new Point(Dpi.X(280), Dpi.X(89)), Size = new Size(Dpi.X(105), Dpi.X(26)) };
+            btnGetPos = new ClayButton { Name = "Get mouse position", Text = Lang.T("Get mouse position"), Location = new Point(Dpi.X(280), Dpi.X(89)), Size = new Size(Dpi.X(140), Dpi.X(26)) };
             var lblRepeat = Lbl("Count (0=infinite):", 395, 33);
             lblRepeat.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             gb.Controls.Add(lblRepeat);
@@ -636,9 +671,9 @@ namespace AutoClickerTool
             var gbRec = Grp("Record / Play", 10, 10, 524, 80);
             btnRecord = new ClayButton { Name = "Start recording", Text = Lang.T("Start recording"), Location = new Point(Dpi.X(15), Dpi.X(27)), Size = new Size(Dpi.X(115), Dpi.X(36)), Accent = true };
             btnPlay = new ClayButton { Name = "Start playback", Text = Lang.T("Start playback"), Location = new Point(Dpi.X(140), Dpi.X(27)), Size = new Size(Dpi.X(115), Dpi.X(36)), Accent = true };
-            btnSave = new ClayButton { Name = "Save Macro", Text = Lang.T("Save Macro"), Location = new Point(Dpi.X(265), Dpi.X(27)), Size = new Size(Dpi.X(75), Dpi.X(36)) };
-            btnLoad = new ClayButton { Name = "Load Macro", Text = Lang.T("Load Macro"), Location = new Point(Dpi.X(350), Dpi.X(27)), Size = new Size(Dpi.X(75), Dpi.X(36)) };
-            btnClear = new ClayButton { Name = "Clear", Text = Lang.T("Clear"), Location = new Point(Dpi.X(435), Dpi.X(27)), Size = new Size(Dpi.X(75), Dpi.X(36)) };
+            btnSave = new ClayButton { Name = "Save Macro", Text = Lang.T("Save Macro"), Location = new Point(Dpi.X(265), Dpi.X(27)), Size = new Size(Dpi.X(85), Dpi.X(36)) };
+            btnLoad = new ClayButton { Name = "Load Macro", Text = Lang.T("Load Macro"), Location = new Point(Dpi.X(360), Dpi.X(27)), Size = new Size(Dpi.X(87), Dpi.X(36)) };
+            btnClear = new ClayButton { Name = "Clear", Text = Lang.T("Clear"), Location = new Point(Dpi.X(457), Dpi.X(27)), Size = new Size(Dpi.X(53), Dpi.X(36)) };
             gbRec.Controls.AddRange(new Control[] { btnRecord, btnPlay, btnSave, btnLoad, btnClear });
             page.Controls.Add(gbRec);
 
@@ -748,7 +783,7 @@ namespace AutoClickerTool
             // 事件编辑按钮
             btnEditDelay = new ClayButton { Name = "Edit delay", Text = Lang.T("Edit delay"), Location = new Point(Dpi.X(440), Dpi.X(234)), Size = new Size(Dpi.X(94), Dpi.X(30)), Anchor = AnchorStyles.Top | AnchorStyles.Right };
             btnAddEvent = new ClayButton { Name = "Add event", Text = Lang.T("Add event"), Location = new Point(Dpi.X(440), Dpi.X(266)), Size = new Size(Dpi.X(94), Dpi.X(30)), Anchor = AnchorStyles.Top | AnchorStyles.Right };
-            btnDeleteEvent = new ClayButton { Name = "Delete selected", Text = Lang.T("Delete selected"), Location = new Point(Dpi.X(440), Dpi.X(298)), Size = new Size(Dpi.X(94), Dpi.X(30)), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            btnDeleteEvent = new ClayButton { Name = "Delete selected", Text = Lang.T("Delete selected"), Location = new Point(Dpi.X(424), Dpi.X(298)), Size = new Size(Dpi.X(110), Dpi.X(30)), Anchor = AnchorStyles.Top | AnchorStyles.Right };
             page.Controls.AddRange(new Control[] { btnEditDelay, btnAddEvent, btnDeleteEvent });
 
             lblEventCount = new Label { Text = Lang.F("Events: {0}", 0), Location = new Point(Dpi.X(15), Dpi.X(354)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
@@ -764,14 +799,14 @@ namespace AutoClickerTool
             var shell = new ClayPanel
             {
                 Location = new Point(Dpi.X(10), Dpi.X(28)),
-                Size = new Size(Dpi.X(390), Dpi.X(172)),
+                Size = new Size(Dpi.X(360), Dpi.X(172)),
                 Inset = true,
                 BackColor = Theme.Current.InputBg
             };
             lstMacros = new ListView
             {
                 Location = new Point(Dpi.X(4), Dpi.X(4)),
-                Size = new Size(Dpi.X(382), Dpi.X(164)),
+                Size = new Size(Dpi.X(352), Dpi.X(164)),
                 View = View.Details,
                 FullRowSelect = true,
                 HideSelection = false,
@@ -782,7 +817,7 @@ namespace AutoClickerTool
             lstMacros.Columns.Add("▶", Dpi.X(36));
             lstMacros.Columns.Add(Lang.T("Macro name"), Dpi.X(150));
             lstMacros.Columns.Add(Lang.T("Events"), Dpi.X(56));
-            lstMacros.Columns.Add(Lang.T("Modified"), Dpi.X(130));
+            lstMacros.Columns.Add(Lang.T("Modified"), Dpi.X(110));
             typeof(ListView).GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
                 .SetValue(lstMacros, true, null);
             shell.Controls.Add(lstMacros);
@@ -822,11 +857,11 @@ namespace AutoClickerTool
             };
             lstMacros.DoubleClick += delegate { PlaySelectedMacro(); };
 
-            btnMacroRename = new ClayButton { Name = "Rename", Text = Lang.T("Rename"), Location = new Point(Dpi.X(410), Dpi.X(28)), Size = new Size(Dpi.X(104), Dpi.X(30)) };
-            btnMacroCopy = new ClayButton { Name = "Create a copy", Text = Lang.T("Create a copy"), Location = new Point(Dpi.X(410), Dpi.X(65)), Size = new Size(Dpi.X(104), Dpi.X(30)) };
-            btnMacroDelete = new ClayButton { Name = "Delete macro", Text = Lang.T("Delete macro"), Location = new Point(Dpi.X(410), Dpi.X(102)), Size = new Size(Dpi.X(104), Dpi.X(30)) };
-            var btnMacroRefresh = new ClayButton { Name = "Refresh", Text = Lang.T("Refresh"), Location = new Point(Dpi.X(410), Dpi.X(139)), Size = new Size(Dpi.X(104), Dpi.X(30)) };
-            var btnMacroFolder = new ClayButton { Name = "Open macros folder", Text = Lang.T("Open macros folder"), Location = new Point(Dpi.X(410), Dpi.X(176)), Size = new Size(Dpi.X(104), Dpi.X(30)) };
+            btnMacroRename = new ClayButton { Name = "Rename", Text = Lang.T("Rename"), Location = new Point(Dpi.X(380), Dpi.X(28)), Size = new Size(Dpi.X(140), Dpi.X(30)) };
+            btnMacroCopy = new ClayButton { Name = "Create a copy", Text = Lang.T("Create a copy"), Location = new Point(Dpi.X(380), Dpi.X(65)), Size = new Size(Dpi.X(140), Dpi.X(30)) };
+            btnMacroDelete = new ClayButton { Name = "Delete macro", Text = Lang.T("Delete macro"), Location = new Point(Dpi.X(380), Dpi.X(102)), Size = new Size(Dpi.X(140), Dpi.X(30)) };
+            var btnMacroRefresh = new ClayButton { Name = "Refresh", Text = Lang.T("Refresh"), Location = new Point(Dpi.X(380), Dpi.X(139)), Size = new Size(Dpi.X(140), Dpi.X(30)) };
+            var btnMacroFolder = new ClayButton { Name = "Open macros folder", Text = Lang.T("Open macros folder"), Location = new Point(Dpi.X(380), Dpi.X(176)), Size = new Size(Dpi.X(140), Dpi.X(30)) };
             btnMacroRefresh.Click += delegate { RefreshMacroList(); };
             btnMacroFolder.Click += delegate { OpenMacrosFolder(); };
             gbMacros.Controls.AddRange(new Control[] { btnMacroRename, btnMacroCopy, btnMacroDelete, btnMacroRefresh, btnMacroFolder });
@@ -852,8 +887,8 @@ namespace AutoClickerTool
             };
             softShell.Controls.Add(lstPrograms);
             gbSoft.Controls.Add(softShell);
-            btnProgramAdd = new ClayButton { Name = "Add program...", Text = Lang.T("Add program..."), Location = new Point(Dpi.X(325), Dpi.X(28)), Size = new Size(Dpi.X(100), Dpi.X(30)) };
-            btnProgramRemove = new ClayButton { Name = "Remove program", Text = Lang.T("Remove program"), Location = new Point(Dpi.X(325), Dpi.X(65)), Size = new Size(Dpi.X(100), Dpi.X(30)) };
+            btnProgramAdd = new ClayButton { Name = "Add program...", Text = Lang.T("Add program..."), Location = new Point(Dpi.X(325), Dpi.X(28)), Size = new Size(Dpi.X(130), Dpi.X(30)) };
+            btnProgramRemove = new ClayButton { Name = "Remove program", Text = Lang.T("Remove program"), Location = new Point(Dpi.X(325), Dpi.X(65)), Size = new Size(Dpi.X(130), Dpi.X(30)) };
             gbSoft.Controls.AddRange(new Control[] { btnProgramAdd, btnProgramRemove });
             chkLaunchStart = new ClayCheck { Name = "Launch programs when playback starts", Text = Lang.T("Launch programs when playback starts"), Location = new Point(Dpi.X(15), Dpi.X(118)) };
             chkLaunchEnd = new ClayCheck { Name = "Launch programs when playback ends", Text = Lang.T("Launch programs when playback ends"), Location = new Point(Dpi.X(230), Dpi.X(118)) };
@@ -887,7 +922,7 @@ namespace AutoClickerTool
             }
             page.Controls.Add(gb);
 
-            btnResetHotkeys = new ClayButton { Name = "Reset default hotkeys", Text = Lang.T("Reset default hotkeys"), Location = new Point(Dpi.X(15), Dpi.X(220)), Size = new Size(Dpi.X(130), Dpi.X(30)), BackColor = Clay.WindowBg };
+            btnResetHotkeys = new ClayButton { Name = "Reset default hotkeys", Text = Lang.T("Reset default hotkeys"), Location = new Point(Dpi.X(15), Dpi.X(220)), Size = new Size(Dpi.X(145), Dpi.X(30)), BackColor = Clay.WindowBg };
             page.Controls.Add(btnResetHotkeys);
 
             page.Controls.Add(Tip("Tip: any key, Ctrl/Alt/Shift/Win combos, multi-key combos (e.g. Ctrl+Q+W), mouse side buttons X1/X2.\r\nChanges are saved to config.json immediately and restored on next launch.\r\nCombos with modifiers or F-keys are recommended; bare letters/numbers conflict with typing.", 12, 262));
@@ -973,10 +1008,10 @@ namespace AutoClickerTool
             gb.Controls.Add(sldGlobalVolume);
             lblGlobalVol = new Label { Text = "100%", Location = new Point(Dpi.X(268), Dpi.X(60)), AutoSize = true, ForeColor = Clay.Ink, BackColor = Clay.CardBg };
             gb.Controls.Add(lblGlobalVol);
-            btnSfxAdd = new ClayButton { Name = "Add binding", Text = Lang.T("Add binding"), Location = new Point(Dpi.X(15), Dpi.X(88)), Size = new Size(Dpi.X(95), Dpi.X(28)) };
-            btnSfxDelete = new ClayButton { Name = "Delete binding", Text = Lang.T("Delete binding"), Location = new Point(Dpi.X(120), Dpi.X(88)), Size = new Size(Dpi.X(95), Dpi.X(28)) };
-            btnSfxTest = new ClayButton { Name = "Play sound", Text = Lang.T("Play sound"), Location = new Point(Dpi.X(225), Dpi.X(88)), Size = new Size(Dpi.X(80), Dpi.X(28)) };
-            btnSfxFolder = new ClayButton { Name = "Open sounds folder", Text = Lang.T("Open sounds folder"), Location = new Point(Dpi.X(315), Dpi.X(88)), Size = new Size(Dpi.X(120), Dpi.X(28)) };
+            btnSfxAdd = new ClayButton { Name = "Add binding", Text = Lang.T("Add binding"), Location = new Point(Dpi.X(15), Dpi.X(88)), Size = new Size(Dpi.X(100), Dpi.X(28)) };
+            btnSfxDelete = new ClayButton { Name = "Delete binding", Text = Lang.T("Delete binding"), Location = new Point(Dpi.X(125), Dpi.X(88)), Size = new Size(Dpi.X(105), Dpi.X(28)) };
+            btnSfxTest = new ClayButton { Name = "Play sound", Text = Lang.T("Play sound"), Location = new Point(Dpi.X(240), Dpi.X(88)), Size = new Size(Dpi.X(80), Dpi.X(28)) };
+            btnSfxFolder = new ClayButton { Name = "Open sounds folder", Text = Lang.T("Open sounds folder"), Location = new Point(Dpi.X(330), Dpi.X(88)), Size = new Size(Dpi.X(140), Dpi.X(28)) };
             gb.Controls.AddRange(new Control[] { chkSfx, btnSfxAdd, btnSfxDelete, btnSfxTest, btnSfxFolder });
             page.Controls.Add(gb);
 
@@ -1180,8 +1215,7 @@ namespace AutoClickerTool
             Text = Lang.F("Auto Clicker {0}", VersionInfo.Version);
             ApplyLangWalk(this);
 
-            string[] tabNames = { Lang.T("Mouse Clicking"), Lang.T("Keyboard Spam"), Lang.T("Record & Play"), Lang.T("Hotkeys"), Lang.T("Advanced"), Lang.T("Sound FX"), Lang.T("Macro Library") };
-            for (int i = 0; i < _tabBtns.Length; i++) _tabBtns[i].Text = tabNames[i];
+            LayoutTabStrip();
 
             if (lstEvents.Columns.Count == 2)
             {

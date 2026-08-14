@@ -186,6 +186,10 @@ namespace AutoClickerTool
         private float _focusT;
         private float _selT = 1f;
 
+        // 文字放不下时自动缩小的字号缓存(键=文本+宽度+字号+样式, 命中则复用, 未缩小为 null)
+        private Font _fitFont;
+        private string _fitKey;
+
         private readonly Action<float> _animHover;
         private readonly Action<float> _animPress;
         private readonly Action<float> _animFocus;
@@ -267,6 +271,30 @@ namespace AutoClickerTool
             return Theme.Blend(baseC, hoverC, Anim.EaseOutCubic(_hoverT));
         }
 
+        /// <summary>文字超出按钮宽度时按比例缩小字号(英文文案普遍比中文长), 下限 7pt 后交给 EndEllipsis。返回 null 表示原字号放得下。</summary>
+        private Font FitFont(int bodyWidth)
+        {
+            string key = Text + "|" + Width + "|" + Font.Size + "|" + Font.Style;
+            if (_fitKey == key) return _fitFont;
+            if (_fitFont != null) { _fitFont.Dispose(); _fitFont = null; }
+            _fitKey = key;
+            int avail = bodyWidth - 8;
+            if (avail < 8) return null;
+            Size sz = TextRenderer.MeasureText(Text, Font);
+            if (sz.Width <= avail) return null;
+            float scale = (float)avail / sz.Width;
+            float size = Font.Size * scale;
+            if (size < 7f) size = 7f;
+            _fitFont = new Font(Font.FontFamily, size, Font.Style);
+            return _fitFont;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (_fitFont != null) { _fitFont.Dispose(); _fitFont = null; }
+            base.Dispose(disposing);
+        }
+
         protected override void OnPaint(PaintEventArgs pe)
         {
             var g = pe.Graphics;
@@ -341,8 +369,9 @@ namespace AutoClickerTool
                 }
             }
 
-            // 文字
-            TextRenderer.DrawText(g, Text, Font, body, Enabled ? ForeColor : Clay.InkSoft,
+            // 文字(放不下时先缩小字号, 再放不下才截断)
+            Font tf = FitFont(body.Width);
+            TextRenderer.DrawText(g, Text, tf != null ? tf : Font, body, Enabled ? ForeColor : Clay.InkSoft,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
 
             // 焦点虚线环(淡入淡出)
