@@ -17,3 +17,7 @@ src/verify_*.png
 
 # 图标生成脚本的预览产物（由 tools/make_icon.ps1 生成）
 tools/icon_preview.png
+
+# Python cache
+__pycache__/
+*.pyc
