@@ -81,17 +81,25 @@ namespace AutoClickerTool
         /// <summary>在当前位置点击一次, 按下与抬起之间有随机人化时长与点击微拖(见 Humanizer)。</summary>
         public static void Click(MouseButton button)
         {
+            // 记录按下前的光标位置, 供抬起后复位(避免"跟随光标"模式每次点击累积漂移)
+            NativeMethods.POINT orig;
+            bool haveOrig = NativeMethods.GetCursorPos(out orig);
+
             MouseDown(button);
             // 点击微拖: 按下与抬起之间 1~2 像素微移, 模拟真人点击的微小滑动
             int mdx, mdy;
             Humanizer.MicroDrag(out mdx, out mdy);
-            if (mdx != 0 || mdy != 0)
+            if ((mdx != 0 || mdy != 0) && haveOrig)
             {
-                NativeMethods.POINT p;
-                if (NativeMethods.GetCursorPos(out p)) MoveTo(p.x + mdx, p.y + mdy);
+                MoveTo(orig.x + mdx, orig.y + mdy);
             }
             Thread.Sleep(Humanizer.NextPressDuration());
             MouseUp(button);
+            if ((mdx != 0 || mdy != 0) && haveOrig)
+            {
+                // 抬起后复位: 跟随模式下用户把光标停在目标点, 微拖不回归会让光标逐次漂移
+                MoveStep(orig.x, orig.y);
+            }
             _hasLastTarget = false;
         }
 

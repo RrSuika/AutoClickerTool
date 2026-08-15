@@ -575,8 +575,13 @@ namespace AutoClickerTool
             }
             if (!string.IsNullOrEmpty(Text))
             {
+                // 标题强调圆点 + 主墨色标题: 与卡片内 InkSoft 标签形成清晰层级(标题更重、更醒目)
+                var dot = new Rectangle(Dpi.X(14), Dpi.X(14), Dpi.X(6), Dpi.X(6));
+                using (var bp = Clay.Round(dot, Dpi.X(3)))
+                using (var br = new SolidBrush(Theme.Current.AccentBottom))
+                    g.FillPath(br, bp);
                 using (var f = new Font(Font, FontStyle.Bold))
-                    TextRenderer.DrawText(g, Text, f, new Rectangle(Dpi.X(16), Dpi.X(7), Width - Dpi.X(32), Dpi.X(20)), Clay.InkSoft,
+                    TextRenderer.DrawText(g, Text, f, new Rectangle(Dpi.X(25), Dpi.X(7), Width - Dpi.X(38), Dpi.X(20)), Clay.Ink,
                         TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.EndEllipsis);
             }
         }

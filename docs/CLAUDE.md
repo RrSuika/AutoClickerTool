@@ -126,7 +126,8 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 
 ## 5. UI 结构
 
-- 顶部栏：热键提示文字 + 置顶开关；胶囊标签条（**7 页**：鼠标连点/键盘连按/录制回放/热键/高级设置/音效/宏库）；底部状态栏（`SetStatus()` 写消息，自动加 ToolTip）
+- 顶部栏：热键提示文字 + 置顶开关；胶囊标签条（**7 页**：鼠标连点/键盘连按/录制回放/热键/高级设置/音效/宏库）；底部状态栏（`SetStatus()` 写消息，自动加 ToolTip；左侧 `lblStatusDot` 是运行指示点——任一引擎运行 = `Clay.Run` 色、空闲 = `Clay.InkSoft`，由 `UpdateStatusDot()` 刷新，挂在 `UpdateAllUi()` 与 300ms 状态定时器上）
+- 分组卡片标题（`ClayGroup.OnPaint`）绘制一枚主题强调色小圆点 + 主墨色（`Clay.Ink`）标题，与卡片内 `InkSoft` 标签形成层级
 - 页面构建函数：`BuildClickerPage / BuildKeyboardPage / BuildMacroPage / BuildHotkeyPage / BuildAdvancedPage / BuildSfxPage / BuildLibraryPage(Panel page)`，签名是 `void Xxx(Panel page)`——**页面由 `BuildUi` 先创建并停靠到 `_contentPanel`，再传给构建函数填充内容**（先停靠再填充，锚点才正确）。宏库页 `BuildLibraryPage` 含已存宏列表（▶ 列快速触发 + 重命名/副本/删除，文件在 `AppConfig.MacrosDir`）+ 软件控制（自动启动程序，`Process.Start`）
 - 回放运行限制在「录制回放」页回放选项卡片：`numPlayLoops`(循环次数 0=无限)、`numPlayMinutes`(运行分钟 0=不限)、`chkUntilTime`+`txtUntilTime`(运行到 HH:mm)，经 `MacroPlayer.LoopCount/RunMinutes/UntilTime` 生效；循环热键提示 `lblLoopHint` 显示当前回放热键
 - 常用辅助：`Lbl(en,x,y)`/`Tip(en,x,y)`（Name 存英文原文供翻译）、`Grp(en,x,y,w,h)` 分组卡片（锚定 Left|Right，随窗口伸缩）、`ClayKit.InputShell(inner,x,y,w)` 给输入控件套圆角外壳
@@ -152,12 +153,13 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 15. **给自绘控件加动效**：控件存一个 `float` 字段（如 `_hoverT`）+ **一个稳定的 `Action<float>` 委托字段**（构造函数里初始化成 `v => { _hoverT = v; Invalidate(); }`），事件里调 `Anim.To(委托, 当前值, 目标值, tauMs)`，OnPaint 用 `Anim.EaseOutCubic(_hoverT)` 做颜色/透明度插值。**委托必须存字段（同一实例），否则 Anim 无法去重、会累积重复动画条目**；`Anim.Enabled=false` 时 `Anim.To` 直接瞬达目标（等效减少动态效果）。tau 参考：悬停 70~100ms、按压 50~100ms、标签过渡 120ms、勾选 110ms（全部 <300ms 符合 UI 动效规范）。**DPI 重建/换主题 `Controls.Clear()` 会销毁旧控件——重建前必须 `Anim.Clear()`**，Anim.Tick 内部也捕获回调异常（控件已销毁时停止该动画），否则动画回调会访问已销毁控件崩溃
 16. **Interception 驱动的过滤器必须 try/finally 复位**：`interception_set_filter(ALL)→send→set_filter(NONE)` 若 send 抛异常而过滤器未复位，驱动会把**整机键盘/鼠标输入全部拦截**（用户键鼠失效）。`SendKey`/`SendMouse` 里 send 必须包在 try 里、复位在 finally 里
 17. **回放停止时按住键要补发抬起**：`MacroPlayer` 回放中 `LeftDown/KeyDown/KeyComboDown` 后若未到对应 `Up` 事件就停止，键会卡住。按住状态是 **`Run()` 局部 HeldState**（`ReleaseHeld(held)` 在 finally 补发抬起）——线程局部化后旧代线程不会干扰新代按键；同理 `KeyboardSpammer` Hold 模式已在 finally 松开
-18. **引擎 Stop→Start 竞态**：三个引擎用**代际计数**防双线程并发——`Stop()` 置 flag 并自增 `_gen`，线程创建时绑定当时的代际，循环内 `Alive(gen)` 同时比对 flag 与代际，finally 里只有当前代际的线程才清 flag/触发事件。退出时 `Shutdown()` 调 `WaitExit(500)`（超时 Abort，确保 finally 已执行）再结束进程
+18. **引擎 Stop→Start 竞态**：三个引擎用**代际计数**防双线程并发——`Start()` 自增 `_gen` 并让新线程绑定该代际，`Stop()` **只置停止 flag、不自增**（若 Stop 自增，线程 finally 里 `_gen == gen` 恒为 false → `Stopped`/`Finished` 事件永不触发，手动停止后 UI 卡在「停止」态、回放停止后热键/音效保持抑制）。循环内 `Alive(gen)` 同时比对 flag 与代际，finally 里只有当前代际的线程才清 flag/触发事件。`_gen` 需 `volatile`（跨线程读）。退出时 `Shutdown()` 调 `WaitExit(500)`（超时 Abort，确保 finally 已执行）再结束进程
 19. **config.json 是不可信输入**：`AppConfig.Load` 里 `SanitizeUntrusted` 清洗——`LaunchPrograms` 只保留绝对路径且扩展名为 exe/lnk（bat/cmd/URL 丢弃并 Log.Warn）；音效绑定值必须等于 `Path.GetFileName(v)`（防 `..\` 路径穿越）。「软件控制」的 AddProgram 对话框只允许 exe/lnk，`LaunchPrograms()` 运行时二次校验白名单
 20. **标签条与按钮文字宽度**：标签条 `LayoutTabStrip()` 按当前语言文本测量所需宽度——放得下时用自然宽度(**只有需要压缩时才按比例分配**, 最后一块吃余量), 放不下等比压缩；构建、`ApplyLanguage`、窗口 `Resize` 时都调用（构建期条宽未布局时用 546 兜底）。`ClayButton` 文字绘制在左右各 6px 内边距的矩形里，放不下自动缩字号（下限 7pt）。新增按钮时无需手工计算文字宽度
 21. **窗口尺寸与 DPI**：`ClientSize = Dpi.X(560)×Dpi.X(530)` 是设计尺寸；`WM_DPICHANGED` 里只采用系统建议的**位置**，尺寸强制回到设计尺寸（否则建议矩形可能与布局宽度不一致, 右侧控件被窗口边缘裁掉）。状态栏「关于」/版本号右锚定、状态文本固定宽+省略号；卡片内控件一律固定坐标（不要右锚定, 否则拉大窗口时被拖走）
 22. **弹窗也要套主题边框**：主窗口与所有对话框（关于/欢迎/热键捕获/事件编辑）共用 `Clay.ApplyFrameTheme(Handle)`（DWM 边框色/标题栏色/深色模式），新加对话框时别漏；任务栏图标 = 主窗口 `Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath)`（与 exe 图标一致）
 23. **连点/连按也支持运行时长与到点停止**：`AutoClicker`/`KeyboardSpammer` 有 `RunMinutes`(0=不限)/`UntilTime`("HH:mm", 空=不限)，解析走 `Util.ParseUntilTime`（跨天=次日, 过夜挂机）；配置字段 `ClickMinutes/ClickUntilTime/SpamMinutes/SpamUntilTime`；三个引擎停止条件检查位置各自在循环体内（Hold 模式按 10ms 粒度检查）
+24. **点击微拖必须复位光标**：`InputSimulator.Click` 的「点击微拖」会在按下/抬起间把真实光标移 ±2px；若不在抬起后复位到按下前位置，「跟随光标」模式下每次点击都累积漂移（用户反映光标越点越往右跑）。抬起后用 `MoveStep(orig.x, orig.y)` 复位即可（微拖本身仍保留，防检测特征不变）
 
 ## 7. 验证流程
 

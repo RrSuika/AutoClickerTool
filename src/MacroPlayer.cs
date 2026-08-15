@@ -18,7 +18,7 @@ namespace AutoClickerTool
         }
 
         private volatile bool _playing;
-        private int _gen; // 代际: Stop 自增, 防止 Stop→Start 竞态双线程并发(同 AutoClicker)
+        private volatile int _gen; // 代际: Start 自增, 防止 Stop→Start 竞态双线程并发(同 AutoClicker)
         private Thread _thread;
 
         /// <summary>回放结束时触发，在后台线程上回调。</summary>
@@ -35,7 +35,8 @@ namespace AutoClickerTool
         public void Start()
         {
             if (_playing) return;
-            int gen = _gen; // 创建时代际即绑定线程, 防止"未及启动的旧线程在重启后冒充当前代"
+            _gen++;          // 新代际: 使旧线程 finally 里 _gen != gen 而放弃收尾(Stop→Start 竞态防护)
+            int gen = _gen;  // 当前线程绑定新代际
             _playing = true;
             _thread = new Thread(delegate() { Run(gen); }) { IsBackground = true, Name = "MacroPlayer" };
             _thread.Start();
@@ -43,8 +44,7 @@ namespace AutoClickerTool
 
         public void Stop()
         {
-            _playing = false;
-            _gen++;
+            _playing = false; // 只置停止标志, 不增代际: 让当前线程 finally 里 _gen == gen 从而触发 Finished
         }
 
         /// <summary>退出前等待线程结束(超时后强杀, 确保 finally 补发抬起已执行, 防止卡键)。</summary>

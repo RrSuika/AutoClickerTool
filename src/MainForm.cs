@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -159,6 +159,7 @@ namespace AutoClickerTool
         private CheckBox chkTopmost;
         private Label lblHotkeyHint;
         private Label lblStatus;
+        private Label lblStatusDot; // 状态栏运行指示点(任一引擎运行 = Run 色, 空闲 = 中性)
         private Button btnAbout;
 
         // 启动与系统托盘
@@ -255,6 +256,7 @@ namespace AutoClickerTool
             {
                 if (_recorder.Recording) RefreshEventList(true);
                 SyncDpi(); // 窗口所在显示器 DPI 与布局不一致时重建(跨屏移动的安全网)
+                UpdateStatusDot(); // 引擎状态可能不经 UpdateAllUi 变化, 轮询兜底刷新指示点
             };
             _statusTimer.Start();
 
@@ -480,11 +482,20 @@ namespace AutoClickerTool
         /// <summary>底部状态栏。</summary>
         private void BuildStatusBar()
         {
+            lblStatusDot = new Label
+            {
+                Text = "●",
+                Location = new Point(Dpi.X(10), Dpi.X(5)),
+                AutoSize = true,
+                ForeColor = Clay.InkSoft,
+                BackColor = Theme.Current.StatusBg
+            };
+            _statusBar.Controls.Add(lblStatusDot);
             lblStatus = new Label
             {
                 Text = Lang.T("Ready"),
-                Location = new Point(Dpi.X(12), Dpi.X(5)),
-                Size = new Size(Dpi.X(300), Dpi.X(16)),
+                Location = new Point(Dpi.X(26), Dpi.X(5)),
+                Size = new Size(Dpi.X(286), Dpi.X(16)),
                 // 固定宽度(不再 Right 锚定): 避免窗口拉大时状态文本向右生长盖住右侧的 关于/版本
                 Anchor = AnchorStyles.Left | AnchorStyles.Top,
                 AutoEllipsis = true,
@@ -2853,6 +2864,15 @@ namespace AutoClickerTool
             UpdateRecordUi();
             UpdatePlayUi();
             UpdateHotkeyUi();
+            UpdateStatusDot();
+        }
+
+        /// <summary>刷新状态栏运行指示点: 任一引擎(连点/连按/回放/录制)运行 = 主题运行色, 否则中性色。</summary>
+        private void UpdateStatusDot()
+        {
+            if (lblStatusDot == null) return;
+            bool running = _clicker.Running || _spammer.Running || _player.Playing || _recorder.Recording;
+            lblStatusDot.ForeColor = running ? Clay.Run : Clay.InkSoft;
         }
 
         // ---------- 窗口生命周期 ----------
