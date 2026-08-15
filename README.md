@@ -121,4 +121,4 @@ Alt+鼠标X1         鼠标侧键
 
 ## 📄 许可证
 
-[MIT](LICENSE) © 2026 R2S-ver
+[MIT](LICENSE) © 2026 RrSuika

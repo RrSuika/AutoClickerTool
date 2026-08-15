@@ -11,9 +11,9 @@ namespace AutoClickerTool
     internal class AboutForm : Form
     {
         // ---- 需要用户替换的占位信息 ----
-        private const string AUTHOR = "R2S-ver";
-        private const string AUTHOR_EN = "R2S-ver";
-        private const string WEBSITE = "https://github.com/R2S-ver/AutoClickerTool";
+        private const string AUTHOR = "RrSuika";
+        private const string AUTHOR_EN = "RrSuika";
+        private const string WEBSITE = "https://github.com/RrSuika/AutoClickerTool";
         // --------------------------------
 
         private Label _lblTitle;

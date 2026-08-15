@@ -121,4 +121,4 @@ This software is for learning and technical exchange only. Do not use it in ways
 
 ## 📄 License
 
-[MIT](LICENSE) © 2026 R2S-ver
+[MIT](LICENSE) © 2026 RrSuika
