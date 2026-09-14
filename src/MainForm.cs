@@ -128,6 +128,7 @@ namespace AutoClickerTool
         private CheckBox chkSfx;
         private ClayComboBox cboSfxScene;
         private Button btnSfxNewScene;
+        private Button btnSfxDelScene;
         private ClaySlider sldGlobalVolume;
         private Label lblGlobalVol;
         private ClaySlider sldKeyVolume;
@@ -156,6 +157,7 @@ namespace AutoClickerTool
 
         private bool _pinHot;                // 标题栏「窗口置顶」图钉是否悬停(非客户区自绘)
         private Label lblHotkeyHint;
+        private ClayButton btnTopmost; // 置顶图钉按钮(顶栏右上角, Selected 高亮 = 置顶中)
         private Label lblStatus;
         private Label lblStatusDot; // 状态栏运行指示点(任一引擎运行 = Run 色, 空闲 = 中性)
         private Button btnAbout;
@@ -406,19 +408,35 @@ namespace AutoClickerTool
             _fadeOverlay.BringToFront();
         }
 
-        /// <summary>顶栏: 热键提示(置顶图钉改为画在标题栏非客户区里, 见 DrawTitleBarPin)。</summary>
+        /// <summary>顶栏: 热键提示 + 置顶图钉按钮(右上角, 选中高亮 = 置顶中)。</summary>
         private void BuildTopBar()
         {
             lblHotkeyHint = new Label
             {
                 Location = new Point(Dpi.X(10), Dpi.X(9)),
-                Size = new Size(Dpi.X(540), Dpi.X(18)),
+                Size = new Size(Dpi.X(500), Dpi.X(18)),
                 Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
                 AutoEllipsis = true,
                 ForeColor = Clay.InkSoft,
                 BackColor = Clay.WindowBg
             };
             _topPanel.Controls.Add(lblHotkeyHint);
+
+            // 置顶图钉: Win11 的 DWM 会覆盖标题栏非客户区自绘, 原标题栏图钉不可见 →
+            // 改为顶栏右侧按钮(始终可见可点), Selected 高亮表示当前置顶中
+            btnTopmost = new ClayButton
+            {
+                Text = "📌",
+                Name = "", // 图标按钮: 避免 ApplyLangWalk 把图标覆盖成翻译文本
+                Location = new Point(Dpi.X(524), Dpi.X(4)),
+                Size = new Size(Dpi.X(28), Dpi.X(26)),
+                Tab = true,        // 胶囊样式 + Selected 状态高亮
+                Selected = TopMost,
+                BackColor = Clay.WindowBg
+            };
+            _hintTip.SetToolTip(btnTopmost, Lang.T("Topmost"));
+            btnTopmost.Click += delegate { SetTopmost(!TopMost); };
+            _topPanel.Controls.Add(btnTopmost);
         }
 
         /// <summary>胶囊标签页条。</summary>
@@ -1072,8 +1090,10 @@ namespace AutoClickerTool
             cboSfxScene.Location = new Point(Dpi.X(70), Dpi.X(54));
             cboSfxScene.Size = new Size(Dpi.X(180), Dpi.X(26));
             gb.Controls.Add(ClayKit.InputShell(cboSfxScene, 70, 54, 180));
-            btnSfxNewScene = new ClayButton { Name = "New scene", Text = Lang.T("New scene"), Location = new Point(Dpi.X(260), Dpi.X(52)), Size = new Size(Dpi.X(100), Dpi.X(26)) };
+            btnSfxNewScene = new ClayButton { Name = "New scene", Text = Lang.T("New scene"), Location = new Point(Dpi.X(260), Dpi.X(52)), Size = new Size(Dpi.X(95), Dpi.X(26)) };
             gb.Controls.Add(btnSfxNewScene);
+            btnSfxDelScene = new ClayButton { Name = "Delete scene", Text = Lang.T("Delete scene"), Location = new Point(Dpi.X(360), Dpi.X(52)), Size = new Size(Dpi.X(95), Dpi.X(26)) };
+            gb.Controls.Add(btnSfxDelScene);
             // 全局音效音量(总音量): 单键音量是相对音量, 实际响度 = 两者相乘; 拉到 0 = 全局静音
             gb.Controls.Add(Lbl("Global SFX volume:", 15, 90));
             sldGlobalVolume = new ClaySlider { Minimum = 0, Maximum = 100, Value = 100, Location = new Point(Dpi.X(140), Dpi.X(86)), Size = new Size(Dpi.X(150), Dpi.X(22)) };
@@ -1127,7 +1147,7 @@ namespace AutoClickerTool
             lblKeyVol = new Label { Text = "100%", Location = new Point(Dpi.X(308), Dpi.X(330)), AutoSize = true, ForeColor = Clay.Ink, BackColor = Clay.WindowBg };
             page.Controls.AddRange(new Control[] { lblKeyVolTitle, sldKeyVolume, lblKeyVol });
 
-            page.Controls.Add(Tip("Tip: assign a sound to any key; pressing the key plays the sound, and a newly pressed bound key overrides the currently playing one.\r\nEach scene has its own subfolder under Sounds (create scenes with the \"New scene\" button) and its own set of bindings.", 12, 356));
+            page.Controls.Add(Tip("Tip: assign a sound to any key; pressing the key plays the sound, and a newly pressed bound key overrides the currently playing one.\r\nEach scene has its own subfolder under Sounds (create scenes with the \"New scene\" button) and its own set of bindings.\r\nPrefer wav files: mp3 playback may fail on some systems.", 12, 356));
         }
 
         private void WireEvents()
@@ -1261,6 +1281,7 @@ namespace AutoClickerTool
                 SetStatus(Lang.F("Sound scene switched to {0}", _cfg.SfxCurrentScene.Length == 0 ? Lang.T("Default scene") : _cfg.SfxCurrentScene));
             };
             btnSfxNewScene.Click += delegate { CreateSfxScene(); };
+            btnSfxDelScene.Click += delegate { DeleteSfxScene(); };
 
             // 语言 / 主题切换
             cboLanguage.SelectedIndexChanged += delegate
@@ -1405,6 +1426,9 @@ namespace AutoClickerTool
             UpdateAllUi();
             RefreshEventList(false);
             Invalidate(true);
+
+            // 状态栏旧消息是切换前语言的快照, 刷新为当前语言的"就绪"
+            SetStatus(Lang.T("Ready"));
             }
             finally
             {
@@ -2423,6 +2447,51 @@ namespace AutoClickerTool
             }
         }
 
+        /// <summary>删除当前选中的场景(默认场景不可删): 二次确认后移除绑定数据 + 文件夹(移入回收站)。</summary>
+        private void DeleteSfxScene()
+        {
+            string scene = _cfg.SfxCurrentScene ?? "";
+            if (scene.Length == 0)
+            {
+                SetStatus(Lang.T("Default scene cannot be deleted"));
+                return;
+            }
+            if (MessageBox.Show(this,
+                    Lang.F("Delete scene \"{0}\"?\r\nIts folder and all sound files inside will be moved to the Recycle Bin.", scene),
+                    Lang.T("Confirm"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                return;
+            try
+            {
+                _cfg.SfxScenes.Remove(scene);
+                _cfg.SfxCurrentScene = "";
+                string dir = Path.Combine(AppConfig.SoundsDir, scene);
+                if (Directory.Exists(dir))
+                {
+                    try
+                    {
+                        // 音效文件可能是用户唯一的副本: 移入回收站而不是直接删除
+                        Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(dir,
+                            Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                            Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                    }
+                    catch (Exception)
+                    {
+                        Directory.Delete(dir, true); // 回收站不可用(如网络盘): 兜底直接删除
+                    }
+                }
+                RefreshSfxScenesCombo();
+                ApplySfxToEngine();
+                RefreshSfxList();
+                UpdateKeyVolumeSlider();
+                SaveSettings();
+                SetStatus(Lang.F("Sound scene deleted: {0}", scene));
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, Lang.F("Save failed: {0}", ex.Message), Lang.T("Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         /// <summary>弹窗输入场景名; 返回 null = 取消。</summary>
         private string PromptSceneName()
         {
@@ -2683,9 +2752,14 @@ namespace AutoClickerTool
         private const int WM_NCHITTEST = 0x0084;
         private const int HTCLIENT = 1;
 
+        /// <summary>标题栏图钉(已停用): Win11 上 DWM 会覆盖 WM_NCPAINT 的非客户区自绘, 图钉画了也看不见,
+        /// 且残留的命中区还可能干扰最小化按钮。置顶入口已改为顶栏按钮 btnTopmost; 旧逻辑保留, 改此开关可回滚。</summary>
+        private static readonly bool TitleBarPinEnabled = false;
+
         /// <summary>标题栏图钉的矩形(客户区坐标系下, 标题栏区域 y 为负值); 取不到返回空。</summary>
         private Rectangle PinRectClient()
         {
+            if (!TitleBarPinEnabled) return Rectangle.Empty;
             try
             {
                 if (!IsHandleCreated) return Rectangle.Empty;
@@ -2834,10 +2908,11 @@ namespace AutoClickerTool
             base.OnMouseDown(e);
         }
 
-        /// <summary>统一设置置顶状态(标题栏图钉 + 托盘菜单共用, 保持两处显示一致)。</summary>
+        /// <summary>统一设置置顶状态(顶栏图钉按钮 + 托盘菜单共用, 保持两处显示一致)。</summary>
         private void SetTopmost(bool on)
         {
             TopMost = on;
+            if (btnTopmost != null) btnTopmost.Selected = on;
             if (_trayTopmost != null) _trayTopmost.Checked = on;
             if (!_applying) SaveSettings();
             RedrawTitleBar();
@@ -3040,8 +3115,9 @@ namespace AutoClickerTool
                 _spamLimit.SetFrom(cfg.SpamLimitMode, cfg.SpamRepeatCount, cfg.SpamSeconds, cfg.SpamUntilAt, cfg.SpamUntilPrimary);
                 _playLimit.SetFrom(cfg.PlayLimitMode, cfg.PlayLoops, cfg.PlaySeconds, cfg.PlayUntilAt, cfg.PlayUntilPrimary);
 
-                // 窗口置顶(标题栏图钉的状态就是窗体的 TopMost; 托盘菜单勾选保持同步)
+                // 窗口置顶(顶栏图钉按钮的 Selected 状态就是窗体的 TopMost; 托盘菜单勾选保持同步)
                 TopMost = cfg.Topmost;
+                if (btnTopmost != null) btnTopmost.Selected = cfg.Topmost;
                 if (_trayTopmost != null) _trayTopmost.Checked = cfg.Topmost;
                 chkAutoStart.Checked = cfg.AutoStart;
                 chkSilentStart.Checked = cfg.StartMinimized;

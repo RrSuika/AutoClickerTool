@@ -129,7 +129,7 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 
 ## 5. UI 结构
 
-- 顶部栏：只有热键提示文字；**「窗口置顶」图钉画在标题栏非客户区、最小化按钮左侧**（`MainForm.PinRectClient/DrawTitleBarPin` + `ClayIcons.DrawPin`：`WM_NCPAINT` 自绘、`WM_NCHITTEST` 返回 `HTCLIENT` 以便收到点击，位置用 `SM_CXSIZE` 推算；状态就是窗体的 `TopMost`）；胶囊标签条（**7 页**：鼠标连点/键盘连按/录制回放/热键/高级设置/音效/宏库）；底部状态栏（`SetStatus()` 写消息，自动加 ToolTip；左侧 `lblStatusDot` 是运行指示点——任一引擎运行 = `Clay.Run` 色、空闲 = `Clay.InkSoft`，由 `UpdateStatusDot()` 刷新，挂在 `UpdateAllUi()` 与 300ms 状态定时器上）
+- 顶部栏：热键提示文字 + **「窗口置顶」图钉按钮（`btnTopmost`，📌 图标，右上角；`Tab=true` 胶囊样式，`Selected` 高亮 = 置顶中；点击走 `SetTopmost`，与托盘菜单同步）**；胶囊标签条（**7 页**：鼠标连点/键盘连按/录制回放/热键/高级设置/音效/宏库）；底部状态栏（`SetStatus()` 写消息，自动加 ToolTip；左侧 `lblStatusDot` 是运行指示点——任一引擎运行 = `Clay.Run` 色、空闲 = `Clay.InkSoft`，由 `UpdateStatusDot()` 刷新，挂在 `UpdateAllUi()` 与 300ms 状态定时器上）。**语言切换时 `ApplyLanguage` 末尾 `SetStatus(Lang.T("Ready"))`**——状态栏旧消息是旧语言的快照，必须刷新
 - 分组卡片标题（`ClayGroup.OnPaint`）绘制一枚主题强调色小圆点 + 主墨色（`Clay.Ink`）标题，与卡片内 `InkSoft` 标签形成层级
 - 页面构建函数：`BuildClickerPage / BuildKeyboardPage / BuildMacroPage / BuildHotkeyPage / BuildAdvancedPage / BuildSfxPage / BuildLibraryPage(Panel page)`，签名是 `void Xxx(Panel page)`——**页面由 `BuildUi` 先创建并停靠到 `_contentPanel`，再传给构建函数填充内容**（先停靠再填充，锚点才正确）。宏库页 `BuildLibraryPage` 含已存宏列表（▶ 列快速触发 + 重命名/副本/删除，文件在 `AppConfig.MacrosDir`）+ 软件控制（自动启动程序，`Process.Start`）
 - **运行限制卡片「Run options」在三个功能页里用完全相同的 `Grp("Run options", 10, 158, 540, 114)` + `RunLimitBox(12,32,516,78)`**（鼠标连点/键盘连按/录制回放），这是刻意的：位置一致方便用户对比调整。三页的顶部设置卡分别是 Click Settings / Key Settings / Record+Play（含回放速度第二行），其余控件（开始按钮、状态、提示）位于卡片下方同一纵坐标
@@ -176,7 +176,7 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 28. **MCI 必须在同一条常驻线程上调用**：`mciSendString` 会在调用线程上建立隐藏通知窗口/设备上下文，线程一退出这套上下文就失效 → 第一次播放静默失败、"必须先点一次试听才能出声"。所以 `SfxManager` 启动时开一条**常驻**播放线程，`WarmUp()` + 所有 `Play`（含「试听」）都在这条线程上跑；**不要退回 `ThreadPool.QueueUserWorkItem`**（线程会退出）。`open` 失败要重试一次并把 `mciGetErrorString` 的内容写进 `log.txt`
 29. **音效音量是「乘法」不是「覆盖」**：`SfxVolume`(全局音效音量) 是总音量，`SfxBindingVolumes`(单键) 是**相对**音量(缺省 100)，实际响度 = 两者相乘 ÷ 100。全局 0 = 全局静音。**不要**再把单键音量当成"覆盖全局的绝对值"，否则全局拉 0 仍有键会响；`SfxPlayer.Play` 也要在 `volume<=0` 时直接返回不打开设备
 30. **输入框失焦**：`WireClickToUnfocus` 给页面/卡片/标签挂 Click → `ActiveControl = null`，让 NumericUpDown/TextBox 点击空白处即提交并停止光标闪烁；新增容器时不用管（递归挂），但**不要**给按钮/列表挂（它们本来就抢焦点）
-31. **标题栏自绘（非客户区）**：`WM_NCPAINT` 里 `base` 之后再 `GetWindowDC` 画（画完 `ReleaseDC`），`WM_NCHITTEST` 对图钉范围返回 `HTCLIENT` 才能收到点击；位置用 `SM_CXSIZE`(按 DPI) 从客户区右缘往左推算。非客户区绘制失败要静默兜底，**并且托盘右键菜单里留「窗口置顶」开关作为备用入口**
+31. **标题栏自绘（非客户区）已停用**：Win11 上 DWM 会覆盖 `WM_NCPAINT` 的非客户区自绘（图钉画了也看不见，残留命中区还可能干扰最小化按钮）。`PinRectClient` 现恒返回 `Rectangle.Empty`（`DrawTitleBarPin`/`PinHitTest`/`OnMouseMove` 热区随之失效，代码保留以便回滚）。置顶入口改为顶栏 `btnTopmost` 按钮 + 托盘菜单「窗口置顶」，**不要再恢复标题栏自绘图钉**
 
 ## 7. 验证流程
 

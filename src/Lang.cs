@@ -351,6 +351,12 @@ namespace AutoClickerTool
             d["Scene already exists"] = "场景已存在";
             d["Sound scene created: {0}"] = "音效场景已创建: {0}";
             d["Sound scene switched to {0}"] = "音效场景已切换到: {0}";
+            d["Tip: assign a sound to any key; pressing the key plays the sound, and a newly pressed bound key overrides the currently playing one.\r\nEach scene has its own subfolder under Sounds (create scenes with the \"New scene\" button) and its own set of bindings.\r\nPrefer wav files: mp3 playback may fail on some systems."]
+                = "提示: 给任意按键绑定音效, 按下即播放, 新按下的绑定键会打断正在播放的音效。\r\n每个场景是 Sounds 下的一个子文件夹(用「新建场景」按钮创建), 并拥有自己的一套绑定。\r\n优先使用 wav 音效文件, mp3 在部分系统上可能无法播放。";
+            d["Delete scene"] = "删除场景";
+            d["Default scene cannot be deleted"] = "默认场景不能删除";
+            d["Delete scene \"{0}\"?\r\nIts folder and all sound files inside will be moved to the Recycle Bin."] = "确定删除场景 \"{0}\"？\r\n该场景的文件夹与里面的音效文件将被移入回收站。";
+            d["Sound scene deleted: {0}"] = "音效场景已删除: {0}";
             d["Sound bound: {0} → {1}"] = "已绑定音效: {0} → {1}";
             d["Press a key or combo to bind a sound...\r\nSingle key, or Ctrl/Alt/Shift/Win combos (e.g. Ctrl+C)\r\nRelease all keys to finish, Esc to cancel"]
                 = "请按下要绑定音效的按键或组合键...\r\n支持单个按键, 或 Ctrl/Alt/Shift/Win 组合键(如 Ctrl+C)\r\n松开全部按键完成设置, Esc 取消";
