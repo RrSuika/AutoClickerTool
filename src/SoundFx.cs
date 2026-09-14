@@ -78,7 +78,11 @@ namespace AutoClickerTool
                     rc = Open(p, type, alias);
                     if (rc != 0)
                     {
-                        Log.Warn("音效打开失败(" + rc + "): " + ErrorText(rc) + " - " + p);
+                        // 266 = MCI 设备驱动加载失败(多见于 mp3): 给出可操作的提示, 而不是让用户对着错误码猜
+                        string hint = rc == 266
+                            ? " — 本机 MCI 不支持播放该格式, 建议把音效转成 wav 后重新绑定"
+                            : "";
+                        Log.Warn("音效打开失败(" + rc + "): " + ErrorText(rc) + " - " + p + hint);
                         return;
                     }
                 }
