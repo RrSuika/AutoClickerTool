@@ -433,8 +433,9 @@ namespace AutoClickerTool
                 Tab = true,        // 胶囊样式: 选中态 = 强调色渐变 + 阴影, 未选中 = 扁平浅色
                 BackColor = Clay.WindowBg
             };
-            // 注意: Tab 按钮的选中态由动画值 _selT 驱动, 必须走 SetSelectionT(), 直接赋 Selected 无效
-            btnTopmost.SetSelectionT(TopMost ? 1f : 0f);
+            // 注意: Tab 按钮的选中态由动画值 _selT 驱动, 必须走 SetSelectionT(), 直接赋 Selected 无效。
+            // 视觉约定: 置顶中 = 亮色奶油样式(醒目), 未置顶 = 淡紫样式 → 与"选中态"映射相反
+            btnTopmost.SetSelectionT(TopMost ? 0f : 1f);
             _hintTip.SetToolTip(btnTopmost, Lang.T(TopMost ? "Topmost enabled" : "Topmost disabled"));
             btnTopmost.Click += delegate { SetTopmost(!TopMost); };
             _topPanel.Controls.Add(btnTopmost);
@@ -2915,7 +2916,7 @@ namespace AutoClickerTool
             TopMost = on;
             if (btnTopmost != null)
             {
-                btnTopmost.SetSelectionT(on ? 1f : 0f); // Tab 按钮选中态走动画值, 直接赋 Selected 无效
+                btnTopmost.SetSelectionT(on ? 0f : 1f); // 置顶中 = 亮色奶油(醒目), 未置顶 = 淡紫
                 _hintTip.SetToolTip(btnTopmost, Lang.T(on ? "Topmost enabled" : "Topmost disabled"));
             }
             if (_trayTopmost != null) _trayTopmost.Checked = on;
@@ -3120,9 +3121,9 @@ namespace AutoClickerTool
                 _spamLimit.SetFrom(cfg.SpamLimitMode, cfg.SpamRepeatCount, cfg.SpamSeconds, cfg.SpamUntilAt, cfg.SpamUntilPrimary);
                 _playLimit.SetFrom(cfg.PlayLimitMode, cfg.PlayLoops, cfg.PlaySeconds, cfg.PlayUntilAt, cfg.PlayUntilPrimary);
 
-                // 窗口置顶(顶栏图钉按钮的选中态就是窗体的 TopMost; 托盘菜单勾选保持同步)
+                // 窗口置顶(顶栏图钉按钮的视觉状态与窗体的 TopMost 同步; 置顶中 = 亮色奶油, 未置顶 = 淡紫)
                 TopMost = cfg.Topmost;
-                if (btnTopmost != null) btnTopmost.SetSelectionT(cfg.Topmost ? 1f : 0f);
+                if (btnTopmost != null) btnTopmost.SetSelectionT(cfg.Topmost ? 0f : 1f);
                 if (_trayTopmost != null) _trayTopmost.Checked = cfg.Topmost;
                 chkAutoStart.Checked = cfg.AutoStart;
                 chkSilentStart.Checked = cfg.StartMinimized;
