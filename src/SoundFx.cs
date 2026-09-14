@@ -86,8 +86,21 @@ namespace AutoClickerTool
                         return;
                     }
                 }
-                // 应用音量(0~1000; waveaudio 支持, 不支持音量的设备静默忽略)
-                mciSendString(string.Format("setaudio {0} volume to {1}", alias, Math.Max(0, Math.Min(1000, volume))), null, 0, IntPtr.Zero);
+                // 应用音量(0~1000)。部分系统的 waveaudio 设备不支持 setaudio(实测返回 261, 命令被丢弃),
+                // 只有 0 会走上面的静音短路 → 失败时改用软件缩放: 按比例缩小样本生成临时 wav 再播放
+                int v = Math.Max(0, Math.Min(1000, volume));
+                if (v < 1000)
+                {
+                    int vrc = mciSendString(string.Format("setaudio {0} volume to {1}", alias, v), null, 0, IntPtr.Zero);
+                    if (vrc != 0)
+                    {
+                        mciSendString(string.Format("close {0}", alias), null, 0, IntPtr.Zero);
+                        string scaled = WavVolume.GetScaled(p, v);
+                        if (scaled == null) return; // 无法缩放: 静默放弃(避免每次按键刷日志)
+                        rc = Open(scaled, "waveaudio", alias);
+                        if (rc != 0) return;
+                    }
+                }
                 mciSendString(string.Format("play {0} notify", alias), null, 0, IntPtr.Zero);
                 _alias = alias;
             }
@@ -119,6 +132,135 @@ namespace AutoClickerTool
             mciSendString("stop " + _alias, null, 0, IntPtr.Zero);
             mciSendString("close " + _alias, null, 0, IntPtr.Zero);
             _alias = null;
+        }
+    }
+
+    /// <summary>软件音量缩放: 部分系统的 waveaudio 设备不支持 setaudio 音量命令(实测 rc=261),
+    /// 按比例缩放 wav 样本幅度写出临时文件(按 源路径+修改时间+音量档 缓存), 播放缩放后的副本。</summary>
+    internal static class WavVolume
+    {
+        private const int BucketStep = 50; // 音量档步长(MCI 0~1000 → 20 档), 限制缓存文件数量
+
+        /// <summary>返回按音量缩放后的 wav 路径(带缓存); 失败返回 null。满音量返回原路径。</summary>
+        public static string GetScaled(string src, int volume)
+        {
+            try
+            {
+                int v = Math.Max(0, Math.Min(1000, volume));
+                if (v >= 1000) return src;
+                string dir = Path.Combine(Path.GetTempPath(), "AutoClickerTool");
+                Directory.CreateDirectory(dir);
+                // 顺手清理一周前的缓存
+                DateTime cutoff = DateTime.Now.AddDays(-7);
+                foreach (var f in Directory.EnumerateFiles(dir, "vol_*.wav"))
+                {
+                    try { if (File.GetLastWriteTime(f) < cutoff) File.Delete(f); } catch (Exception) { }
+                }
+                string key = src.ToLowerInvariant() + "|" + File.GetLastWriteTimeUtc(src).Ticks;
+                int bucket = v / BucketStep; // 0..20
+                string dst = Path.Combine(dir, "vol_" + (key.GetHashCode() & 0x7fffffff).ToString("x8") + "_" + bucket + ".wav");
+                if (!File.Exists(dst))
+                {
+                    if (!ScaleWav(src, dst, (float)v / 1000f))
+                    {
+                        try { if (File.Exists(dst)) File.Delete(dst); } catch (Exception) { }
+                        return null;
+                    }
+                }
+                return dst;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>整份复制 wav 并缩放 data 块的样本幅度(支持 PCM 8/16/24/32 位与 IEEE float32)。</summary>
+        private static bool ScaleWav(string src, string dst, float factor)
+        {
+            try
+            {
+                byte[] all = File.ReadAllBytes(src);
+                if (all.Length < 44) return false;
+                if (Encoding.ASCII.GetString(all, 0, 4) != "RIFF" || Encoding.ASCII.GetString(all, 8, 4) != "WAVE") return false;
+                int fmt = -1, data = -1, dataSize = 0;
+                ushort tag = 0, bits = 0;
+                int p = 12;
+                while (p + 8 <= all.Length)
+                {
+                    string id = Encoding.ASCII.GetString(all, p, 4);
+                    int size = BitConverter.ToInt32(all, p + 4);
+                    if (id == "fmt " && fmt < 0)
+                    {
+                        fmt = p + 8;
+                        tag = BitConverter.ToUInt16(all, fmt);
+                        bits = BitConverter.ToUInt16(all, fmt + 14);
+                    }
+                    else if (id == "data" && data < 0)
+                    {
+                        data = p + 8;
+                        dataSize = size;
+                    }
+                    p += 8 + size + (size & 1); // 块按 2 字节对齐
+                }
+                if (fmt < 0 || data < 0 || dataSize <= 0) return false;
+
+                if (tag == 1) // PCM
+                {
+                    int bytesPer = bits / 8;
+                    if (bits != 8 && bits != 16 && bits != 24 && bits != 32) return false;
+                    for (int i = 0; i + bytesPer <= dataSize; i += bytesPer)
+                    {
+                        int off = data + i;
+                        if (bits == 8)
+                        {
+                            int s = all[off] - 128;
+                            all[off] = (byte)Math.Max(0, Math.Min(255, (int)Math.Round(s * factor + 128)));
+                        }
+                        else if (bits == 16)
+                        {
+                            short s = BitConverter.ToInt16(all, off);
+                            short v2 = (short)Math.Max(-32768, Math.Min(32767, (int)Math.Round(s * factor)));
+                            byte[] b = BitConverter.GetBytes(v2);
+                            all[off] = b[0];
+                            all[off + 1] = b[1];
+                        }
+                        else if (bits == 24)
+                        {
+                            int s = all[off] | (all[off + 1] << 8) | ((sbyte)all[off + 2] << 16);
+                            int v2 = (int)Math.Round(s * factor);
+                            all[off] = (byte)(v2 & 0xFF);
+                            all[off + 1] = (byte)((v2 >> 8) & 0xFF);
+                            all[off + 2] = (byte)((v2 >> 16) & 0xFF);
+                        }
+                        else // 32
+                        {
+                            int s = BitConverter.ToInt32(all, off);
+                            byte[] b = BitConverter.GetBytes((int)Math.Round(s * factor));
+                            Buffer.BlockCopy(b, 0, all, off, 4);
+                        }
+                    }
+                }
+                else if (tag == 3) // IEEE float32
+                {
+                    for (int i = 0; i + 4 <= dataSize; i += 4)
+                    {
+                        int off = data + i;
+                        float s = BitConverter.ToSingle(all, off);
+                        float v2 = Math.Max(-1f, Math.Min(1f, s * factor));
+                        byte[] b = BitConverter.GetBytes(v2);
+                        Buffer.BlockCopy(b, 0, all, off, 4);
+                    }
+                }
+                else return false;
+
+                File.WriteAllBytes(dst, all);
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
         }
     }
 

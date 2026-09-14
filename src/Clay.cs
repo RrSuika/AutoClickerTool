@@ -1056,7 +1056,9 @@ namespace AutoClickerTool
             {
                 var fill = new Rectangle(pad, cy - trackH / 2, fillW, trackH);
                 using (var bp = Clay.Round(fill, trackH / 2))
-                using (var br = Clay.Gradient(fill, Theme.Current.AccentTop, Theme.Current.AccentBottom))
+                using (var br = Enabled
+                    ? Clay.Gradient(fill, Theme.Current.AccentTop, Theme.Current.AccentBottom)
+                    : (Brush)new SolidBrush(Clay.InkSoft)) // 禁用态填充也要变灰, 否则看起来"锁在满值可用"
                     g.FillPath(br, bp);
             }
 
