@@ -680,12 +680,17 @@ namespace AutoClickerTool
         private void BuildKeyboardPage(Panel page)
         {
             var gb = Grp("Key Settings", 10, 10, 540, 136);
-            // 行1: 按键下拉(单键快捷选择)
-            gb.Controls.Add(Lbl("Key:", 15, 30));
+            // 行1: 按键下拉(单键快捷选择); 点击标签/下拉区域 = 切换为「按键」占主导并清空已捕获的键
+            var lblKey = Lbl("Key:", 15, 30);
+            lblKey.Click += delegate { EnableDropdownMode(); };
+            gb.Controls.Add(lblKey);
             cboKey = new ClayComboBox();
             foreach (var kv in _keyOptions) cboKey.Items.Add(kv.Key);
             cboKey.SelectedIndex = 0;
-            gb.Controls.Add(ClayKit.InputShell(cboKey, 60, 30, 130));
+            var shellKey = ClayKit.InputShell(cboKey, 60, 30, 130);
+            // cboKey 禁用(「点击按键」占主导)时点击会落到外壳上 → 从这里恢复下拉模式
+            shellKey.Click += delegate { EnableDropdownMode(); };
+            gb.Controls.Add(shellKey);
 
             // 行2: 「点击按键」——捕获一个按键, 也可以同时按下多个键捕获成组合键(如 Shift+A)
             gb.Controls.Add(Lbl("Click key:", 15, 60));
@@ -1638,6 +1643,18 @@ namespace AutoClickerTool
             return false;
         }
 
+        /// <summary>点击「按键」标签/下拉区域: 切换为按键下拉占主导——清空「点击按键」捕获的键、解除灰化并展开下拉。</summary>
+        private void EnableDropdownMode()
+        {
+            if (cboKey == null || cboKey.Enabled) return;
+            _spamHotkey = null;          // 之后 CurrentSpamHotkey 走下拉框选中的单键
+            cboKey.Enabled = true;
+            cboKey.DroppedDown = true;   // 用户点了就是想选键, 直接展开列表
+            UpdateSpamKeyButtonText();   // 按钮上的已捕获键清空, 恢复提示文字
+            SaveSettings();
+            SetStatus(Lang.F("Keyboard spam key set to {0}", cboKey.Text));
+        }
+
         /// <summary>当前连按按键: 「点击按键」捕获的按键/组合优先, 否则用下拉框选中的单键。</summary>
         private Hotkey CurrentSpamHotkey()
         {
@@ -1670,6 +1687,7 @@ namespace AutoClickerTool
                     if (f.ShowDialog(this) != DialogResult.OK || f.Captured == null) return;
                     _spamHotkey = f.Captured;
                     UpdateSpamKeyButtonText();
+                    cboKey.Enabled = false; // 「点击按键」覆盖按键下拉: 下拉变灰(点击下拉区域可切回)
                     SaveSettings();
                     SetStatus(Lang.F("Keyboard spam key set to {0}", _spamHotkey));
                 }
@@ -2845,6 +2863,7 @@ namespace AutoClickerTool
                 // 键盘连按: 组合键 + 下拉框单键
                 _spamHotkey = string.IsNullOrEmpty(cfg.SpamCombo) ? null : Hotkey.Parse(cfg.SpamCombo);
                 UpdateSpamKeyButtonText();
+                cboKey.Enabled = _spamHotkey == null; // 有捕获键时「点击按键」占主导: 下拉灰化
                 int keyIdx = _keyOptions.FindIndex(kv => kv.Value == cfg.SpamVk);
                 cboKey.SelectedIndex = keyIdx >= 0 ? keyIdx : 0;
                 rbHold.Checked = cfg.SpamHold;
