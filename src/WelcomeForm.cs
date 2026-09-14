@@ -27,6 +27,7 @@ namespace AutoClickerTool
             AutoScaleMode = AutoScaleMode.None;
             Font = new Font("Microsoft YaHei UI", 9F);
             BackColor = Clay.WindowBg;
+            TopMost = true; // 主窗口可能置顶: 弹窗不置顶会被盖住
             HandleCreated += delegate { Clay.ApplyFrameTheme(Handle); };
 
             _title = new Label

@@ -2435,6 +2435,7 @@ namespace AutoClickerTool
                 f.MaximizeBox = false;
                 f.MinimizeBox = false;
                 f.ShowInTaskbar = false;
+                f.TopMost = true; // 主窗口可能置顶: 弹窗不置顶会被盖住, 无法点击
                 Clay.ApplyFrameTheme(f.Handle);
                 f.BackColor = Clay.WindowBg;
                 var lbl = new Label { Text = Lang.T("Scene name:"), Location = new Point(Dpi.X(16), Dpi.X(20)), AutoSize = true, ForeColor = Clay.Ink, BackColor = Clay.WindowBg };

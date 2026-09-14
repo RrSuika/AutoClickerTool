@@ -31,6 +31,7 @@ namespace AutoClickerTool
             AutoScaleMode = AutoScaleMode.None;
             Font = new Font("Microsoft YaHei UI", 9F);
             BackColor = Clay.WindowBg;
+            TopMost = true; // 主窗口可能置顶: 弹窗不置顶会被盖住, 无法点击(与 HotkeyCaptureForm 同款处理)
 
             var card = new ClayPanel
             {

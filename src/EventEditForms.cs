@@ -22,6 +22,7 @@ namespace AutoClickerTool
             BackColor = Clay.WindowBg;
             Font = new Font("Microsoft YaHei UI", 9F);
             ClientSize = new Size(Dpi.X(260), Dpi.X(96));
+            TopMost = true; // 主窗口可能置顶: 弹窗不置顶会被盖住, 无法点击
             HandleCreated += delegate { Clay.ApplyFrameTheme(Handle); };
 
             var card = new ClayPanel { Location = new Point(Dpi.X(10), Dpi.X(10)), Size = new Size(Dpi.X(240), Dpi.X(76)), BackColor = Clay.CardBg };
@@ -108,6 +109,7 @@ namespace AutoClickerTool
             BackColor = Clay.WindowBg;
             Font = new Font("Microsoft YaHei UI", 9F);
             ClientSize = new Size(Dpi.X(340), Dpi.X(210));
+            TopMost = true; // 主窗口可能置顶: 弹窗不置顶会被盖住, 无法点击
             HandleCreated += delegate { Clay.ApplyFrameTheme(Handle); };
 
             var card = new ClayPanel { Location = new Point(Dpi.X(10), Dpi.X(10)), Size = new Size(Dpi.X(320), Dpi.X(190)), BackColor = Clay.CardBg };
