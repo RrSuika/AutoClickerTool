@@ -430,11 +430,12 @@ namespace AutoClickerTool
                 Name = "", // 图标按钮: 避免 ApplyLangWalk 把图标覆盖成翻译文本
                 Location = new Point(Dpi.X(524), Dpi.X(4)),
                 Size = new Size(Dpi.X(28), Dpi.X(26)),
-                Tab = true,        // 胶囊样式 + Selected 状态高亮
-                Selected = TopMost,
+                Tab = true,        // 胶囊样式: 选中态 = 强调色渐变 + 阴影, 未选中 = 扁平浅色
                 BackColor = Clay.WindowBg
             };
-            _hintTip.SetToolTip(btnTopmost, Lang.T("Topmost"));
+            // 注意: Tab 按钮的选中态由动画值 _selT 驱动, 必须走 SetSelectionT(), 直接赋 Selected 无效
+            btnTopmost.SetSelectionT(TopMost ? 1f : 0f);
+            _hintTip.SetToolTip(btnTopmost, Lang.T(TopMost ? "Topmost enabled" : "Topmost disabled"));
             btnTopmost.Click += delegate { SetTopmost(!TopMost); };
             _topPanel.Controls.Add(btnTopmost);
         }
@@ -2912,7 +2913,11 @@ namespace AutoClickerTool
         private void SetTopmost(bool on)
         {
             TopMost = on;
-            if (btnTopmost != null) btnTopmost.Selected = on;
+            if (btnTopmost != null)
+            {
+                btnTopmost.SetSelectionT(on ? 1f : 0f); // Tab 按钮选中态走动画值, 直接赋 Selected 无效
+                _hintTip.SetToolTip(btnTopmost, Lang.T(on ? "Topmost enabled" : "Topmost disabled"));
+            }
             if (_trayTopmost != null) _trayTopmost.Checked = on;
             if (!_applying) SaveSettings();
             RedrawTitleBar();
@@ -3115,9 +3120,9 @@ namespace AutoClickerTool
                 _spamLimit.SetFrom(cfg.SpamLimitMode, cfg.SpamRepeatCount, cfg.SpamSeconds, cfg.SpamUntilAt, cfg.SpamUntilPrimary);
                 _playLimit.SetFrom(cfg.PlayLimitMode, cfg.PlayLoops, cfg.PlaySeconds, cfg.PlayUntilAt, cfg.PlayUntilPrimary);
 
-                // 窗口置顶(顶栏图钉按钮的 Selected 状态就是窗体的 TopMost; 托盘菜单勾选保持同步)
+                // 窗口置顶(顶栏图钉按钮的选中态就是窗体的 TopMost; 托盘菜单勾选保持同步)
                 TopMost = cfg.Topmost;
-                if (btnTopmost != null) btnTopmost.Selected = cfg.Topmost;
+                if (btnTopmost != null) btnTopmost.SetSelectionT(cfg.Topmost ? 1f : 0f);
                 if (_trayTopmost != null) _trayTopmost.Checked = cfg.Topmost;
                 chkAutoStart.Checked = cfg.AutoStart;
                 chkSilentStart.Checked = cfg.StartMinimized;
