@@ -16,7 +16,12 @@ namespace AutoClickerTool
         public int ConfigVersion = 0;
 
         /// <summary>当前配置结构版本。新增字段并需要迁移时 +1, 并在 Migrate() 里按版本补齐。</summary>
-        private const int CurrentVersion = 3;
+        private const int CurrentVersion = 4;
+
+        // 运行限制模式: 三个功能(连点/连按/回放)统一使用同一套语义。
+        public const int LimitCount = 0;      // 指定次数
+        public const int LimitInfinite = 1;   // 无限循环
+        public const int LimitDuration = 2;   // 运行指定时长 / 运行到指定时刻
 
         // ---- 功能热键 ----
         public string ClickerHotkey = "F6";
@@ -31,24 +36,38 @@ namespace AutoClickerTool
         public bool ClickFixedPosition = false;
         public int ClickFixedX = 0;
         public int ClickFixedY = 0;
-        public int ClickRepeatCount = 0;     // 0 = 无限
-        public int ClickMinutes = 0;         // 运行分钟数, 0 = 不限
-        public string ClickUntilTime = "";   // 运行到系统时刻 "HH:mm", 空 = 不限
+        public int ClickRepeatCount = 0;     // 指定次数模式的点击次数, 0 = 无限
+        public int ClickLimitMode = LimitInfinite; // 运行限制模式(见 LimitCount/LimitInfinite/LimitDuration)
+        public int ClickSeconds = 0;         // 运行时长(秒); 与 ClickUntilAt 双向同步, 0 = 用 ClickUntilAt
+        public string ClickUntilAt = "";     // 绝对截止时刻 "yyyy-MM-dd HH:mm:ss", 空 = 不限
+        public bool ClickUntilPrimary = false; // 上次保存时以"截止时刻"为准(而非时长), 重启后截止点不漂移
+        public int ClickMinutes = 0;         // (旧字段, 仅用于迁移) 运行分钟数, 0 = 不限
+        public string ClickUntilTime = "";   // (旧字段, 仅用于迁移) 运行到系统时刻 "HH:mm"
 
         // ---- 键盘连按 ----
-        public int SpamVk = 0x41;            // 虚拟键码, 默认 A
-        public string SpamKeyText = "";      // 键盘连按页直接输入的按键文本(空 = 用下拉框选择)
+        public int SpamVk = 0x41;            // (旧字段) 虚拟键码, 默认 A
+        public string SpamKeyText = "";      // (旧字段) 直接输入的按键文本(空 = 用下拉框选择)
+        public string SpamCombo = "";        // 连按的按键组合(如 "A" / "Ctrl+Shift+A"), 空 = 用 SpamVk
         public int SpamIntervalMs = 100;
         public bool SpamHold = false;
-        public int SpamMinutes = 0;          // 运行分钟数, 0 = 不限
-        public string SpamUntilTime = "";    // 运行到系统时刻 "HH:mm", 空 = 不限
+        public int SpamRepeatCount = 0;      // 指定次数模式的点按次数, 0 = 无限
+        public int SpamLimitMode = LimitInfinite;
+        public int SpamSeconds = 0;          // 运行时长(秒); 与 SpamUntilAt 双向同步
+        public string SpamUntilAt = "";      // 绝对截止时刻 "yyyy-MM-dd HH:mm:ss", 空 = 不限
+        public bool SpamUntilPrimary = false; // 上次保存时以"截止时刻"为准(而非时长)
+        public int SpamMinutes = 0;          // (旧字段, 仅用于迁移) 运行分钟数
+        public string SpamUntilTime = "";    // (旧字段, 仅用于迁移) 运行到系统时刻 "HH:mm"
 
         // ---- 录制回放 ----
         public double PlaySpeed = 1.0;
-        public bool PlayLoop = false;
-        public int PlayLoops = 0;           // 循环次数, 0 = 无限
-        public int PlayMinutes = 0;         // 运行分钟数, 0 = 不限
-        public string PlayUntilTime = "";   // 运行到系统时刻 "HH:mm", 空 = 不限
+        public bool PlayLoop = false;        // (旧字段, 仅用于迁移)
+        public int PlayLoops = 1;            // 指定次数模式的循环轮数, 0 = 无限
+        public int PlayLimitMode = LimitCount; // 默认: 回放一轮(与旧默认一致)
+        public int PlaySeconds = 0;          // 运行时长(秒); 与 PlayUntilAt 双向同步
+        public string PlayUntilAt = "";      // 绝对截止时刻 "yyyy-MM-dd HH:mm:ss", 空 = 不限
+        public bool PlayUntilPrimary = false; // 上次保存时以"截止时刻"为准(而非时长)
+        public int PlayMinutes = 0;          // (旧字段, 仅用于迁移) 运行分钟数
+        public string PlayUntilTime = "";    // (旧字段, 仅用于迁移) 运行到系统时刻 "HH:mm"
 
         // ---- 软件控制(宏库页) ----
         public List<string> LaunchPrograms = new List<string>();
@@ -169,7 +188,66 @@ namespace AutoClickerTool
                 // 老配置保留其显式保存的值(无法区分"用户手动关闭"与"旧默认 false", 故不强制覆盖)。
                 Log.Warn(string.Format("配置从版本 {0} 迁移到 {1}", cfg.ConfigVersion, 3));
             }
+            if (cfg.ConfigVersion < 4)
+            {
+                // v3 → v4: 三个功能的运行限制统一为「指定次数 / 无限循环 / 运行时长(到点)」三模式。
+                // 旧配置只有 "次数(0=无限) + 运行分钟 + HH:mm 到点", 这里换算到新模式。
+                Log.Warn(string.Format("配置从版本 {0} 迁移到 {1}", cfg.ConfigVersion, 4));
+
+                cfg.ClickLimitMode = DeriveMode(cfg.ClickRepeatCount, cfg.ClickMinutes, cfg.ClickUntilTime);
+                cfg.ClickSeconds = cfg.ClickMinutes * 60;
+                cfg.ClickUntilAt = NormalizeUntilAt(cfg.ClickUntilTime);
+
+                cfg.SpamLimitMode = (cfg.SpamMinutes > 0 || !string.IsNullOrEmpty(cfg.SpamUntilTime))
+                    ? LimitDuration : LimitInfinite;
+                cfg.SpamSeconds = cfg.SpamMinutes * 60;
+                cfg.SpamUntilAt = NormalizeUntilAt(cfg.SpamUntilTime);
+
+                if (cfg.PlayMinutes > 0 || !string.IsNullOrEmpty(cfg.PlayUntilTime))
+                {
+                    cfg.PlayLimitMode = LimitDuration;
+                    cfg.PlaySeconds = cfg.PlayMinutes * 60;
+                }
+                else if (cfg.PlayLoops > 0)
+                {
+                    cfg.PlayLimitMode = LimitCount;
+                }
+                else if (cfg.PlayLoop)
+                {
+                    cfg.PlayLimitMode = LimitInfinite;
+                    cfg.PlayLoops = 0;
+                }
+                else
+                {
+                    // 旧默认(不勾循环、次数 0): 只回放一轮
+                    cfg.PlayLimitMode = LimitCount;
+                    cfg.PlayLoops = 1;
+                }
+                cfg.PlayUntilAt = NormalizeUntilAt(cfg.PlayUntilTime);
+
+                // 旧 "HH:mm" 到点语义是"今天/明天该时刻" → 迁移后以截止时刻为准(主),
+                // 加载时按该语义顺延, 截止点不会随重启漂移
+                cfg.ClickUntilPrimary = !string.IsNullOrEmpty(cfg.ClickUntilTime);
+                cfg.SpamUntilPrimary = !string.IsNullOrEmpty(cfg.SpamUntilTime);
+                cfg.PlayUntilPrimary = !string.IsNullOrEmpty(cfg.PlayUntilTime);
+            }
             cfg.ConfigVersion = CurrentVersion;
+        }
+
+        /// <summary>旧配置 → 新运行限制模式: 有"时长/到点"优先, 其次"指定次数", 否则无限循环。</summary>
+        private static int DeriveMode(int repeatCount, int minutes, string untilText)
+        {
+            if (minutes > 0 || !string.IsNullOrEmpty(untilText)) return LimitDuration;
+            if (repeatCount > 0) return LimitCount;
+            return LimitInfinite;
+        }
+
+        /// <summary>旧 "HH:mm" 到点 → 绝对时刻字符串("yyyy-MM-dd HH:mm:ss"); 空/非法返回空串。</summary>
+        private static string NormalizeUntilAt(string oldUntil)
+        {
+            if (string.IsNullOrEmpty(oldUntil)) return "";
+            DateTime? t = Util.ParseUntilTime(oldUntil);
+            return t.HasValue ? t.Value.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) : "";
         }
 
         public void Save()

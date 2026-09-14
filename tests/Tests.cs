@@ -98,7 +98,7 @@ internal static class Tests
         Check(fresh.SfxEnabled == true, "SfxEnabled 默认开启");
         Check(fresh.AutoStart == false, "AutoStart 默认关闭");
         Check(fresh.StartMinimized == false, "StartMinimized 默认关闭");
-        Check(fresh.ConfigVersion == 0, "ConfigVersion 原始默认=0(经 Load 后迁移为 3)");
+        Check(fresh.ConfigVersion == 0, "ConfigVersion 原始默认=0(经 Load 后迁移为 4)");
 
         Console.WriteLine("== AppConfig 不可信数据清洗(安全) ==");
         {
@@ -123,7 +123,74 @@ internal static class Tests
                     "LaunchPrograms 白名单: bat/相对路径被丢弃, exe/lnk 保留");
                 Check(!loaded.SfxBindings.ContainsKey("65") && loaded.SfxBindings["66"] == "ok.wav",
                     "音效绑定路径穿越被丢弃, 纯文件名保留");
-                Check(loaded.ConfigVersion == 3, "经 Load 后 ConfigVersion 迁移为 3");
+                Check(loaded.ConfigVersion == 4, "经 Load 后 ConfigVersion 迁移为 4");
+            }
+            finally
+            {
+                try { System.IO.File.Delete(path); } catch (Exception) { }
+                try { System.IO.File.Delete(path + ".tmp"); } catch (Exception) { }
+            }
+        }
+
+        Console.WriteLine("== 运行到时刻解析 ==");
+        {
+            var t1 = Util.ParseUntilTime("23:59");
+            Check(t1.HasValue && t1.Value > DateTime.Now && (t1.Value - DateTime.Now).TotalHours <= 25,
+                "\"HH:mm\" 解析为今天/明天的该时刻");
+
+            var t2 = Util.ParseUntilTime("2099-01-02 03:04:05");
+            Check(t2.HasValue && t2.Value.Year == 2099 && t2.Value.Hour == 3
+                && t2.Value.Minute == 4 && t2.Value.Second == 5, "完整日期时刻按字面解析");
+
+            Check(Util.ParseUntilTime("") == null, "空串 → null");
+            Check(Util.ParseUntilTime("not-a-time") == null, "非法串 → null");
+
+            Check(Util.FormatDuration(605) == "10m 5s", "FormatDuration(605), 实际:" + Util.FormatDuration(605));
+            Check(Util.FormatDuration(3600) == "1h 0m 0s", "FormatDuration(3600), 实际:" + Util.FormatDuration(3600));
+        }
+
+        Console.WriteLine("== 运行限制配置迁移(v3 → v4) ==");
+        {
+            string path = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
+            try
+            {
+                // 辅助: 写旧配置 → 加载(触发迁移) → 返回迁移后配置
+                Func<AppConfig, AppConfig> loadMigrated = delegate(AppConfig old)
+                {
+                    System.IO.File.WriteAllText(path, ser.Serialize(old));
+                    string err;
+                    return AppConfig.Load(out err);
+                };
+
+                // 旧: 勾了循环但没设次数 → 无限循环(PlayLoop 分支)
+                var c1 = loadMigrated(new AppConfig { ConfigVersion = 3, PlayLoop = true, PlayLoops = 0 });
+                Check(c1.PlayLimitMode == AppConfig.LimitInfinite && c1.PlayLoops == 0,
+                    "旧 PlayLoop=true+0 次 → 无限循环");
+
+                // 旧默认: 不勾循环、次数 0 → 只回放一轮
+                var c2 = loadMigrated(new AppConfig { ConfigVersion = 3, PlayLoop = false, PlayLoops = 0 });
+                Check(c2.PlayLimitMode == AppConfig.LimitCount && c2.PlayLoops == 1,
+                    "旧默认(不循环,0 次) → 一轮");
+
+                // 旧: 次数优先于循环开关(PlayLoops>0 分支先于 PlayLoop 分支)
+                var c3 = loadMigrated(new AppConfig { ConfigVersion = 3, PlayLoop = true, PlayLoops = 900 });
+                Check(c3.PlayLimitMode == AppConfig.LimitCount && c3.PlayLoops == 900,
+                    "旧 PlayLoop=true+900 次 → 指定次数 900");
+
+                // 旧: 点击运行 10 分钟 → 时长模式 600 秒
+                var c4 = loadMigrated(new AppConfig { ConfigVersion = 3, ClickMinutes = 10 });
+                Check(c4.ClickLimitMode == AppConfig.LimitDuration && c4.ClickSeconds == 600,
+                    "旧 运行 10 分钟 → 时长模式 600 秒");
+
+                // 旧: 连按运行到 "23:59" → 时长模式 + 以截止时刻为准 + 绝对时刻已归一化(重启不漂移)
+                var c5 = loadMigrated(new AppConfig { ConfigVersion = 3, SpamUntilTime = "23:59" });
+                Check(c5.SpamLimitMode == AppConfig.LimitDuration && c5.SpamUntilPrimary
+                    && !string.IsNullOrEmpty(c5.SpamUntilAt), "旧 到点 23:59 → 时长模式 + 截止时刻为准");
+
+                // 旧: 只设了到点(没设分钟) → 同样迁移为时长模式 + 截止时刻为准(默认是无限, 有区分力)
+                var c6 = loadMigrated(new AppConfig { ConfigVersion = 3, ClickUntilTime = "08:00" });
+                Check(c6.ClickLimitMode == AppConfig.LimitDuration && c6.ClickUntilPrimary
+                    && !string.IsNullOrEmpty(c6.ClickUntilAt), "旧 到点 08:00(无分钟) → 时长模式 + 截止时刻为准");
             }
             finally
             {

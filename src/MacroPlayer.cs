@@ -27,10 +27,10 @@ namespace AutoClickerTool
         public bool Playing { get { return _playing; } }
         public List<MacroEvent> Events { get; set; }
         public double Speed { get; set; }
-        public bool Loop { get; set; }
-        public int LoopCount { get; set; }      // 循环次数, 0 = 无限
-        public int RunMinutes { get; set; }     // 运行分钟数, 0 = 不限
-        public string UntilTime { get; set; }   // 运行到系统时刻 "HH:mm", 空 = 不限
+        /// <summary>回放轮数, 0 = 无限循环。</summary>
+        public int RepeatCount { get; set; }
+        /// <summary>运行到该绝对时刻自动停止; null = 不限时。</summary>
+        public DateTime? UntilAt { get; set; }
 
         public void Start()
         {
@@ -86,12 +86,7 @@ namespace AutoClickerTool
             HeldState held = new HeldState(); // 按住状态线程局部化, 旧代线程无法干扰新代
             try
             {
-                DateTime started = DateTime.Now;
                 int played = 0;
-
-                // 运行到时刻: 解析一次; 目标时刻已过(如 22:00 设 03:00)视为次日, 支持过夜挂机
-                DateTime? untilTarget = Util.ParseUntilTime(UntilTime);
-
                 do
                 {
                     foreach (MacroEvent e in Events)
@@ -100,10 +95,9 @@ namespace AutoClickerTool
                         if (!PlayEvent(e, held, gen)) return;
                     }
                     played++;
-                    if (LoopCount > 0 && played >= LoopCount) break;
-                    if (RunMinutes > 0 && (DateTime.Now - started).TotalMinutes >= RunMinutes) break;
-                    if (untilTarget.HasValue && DateTime.Now >= untilTarget.Value) break;
-                } while (Loop && Alive(gen));
+                    if (RepeatCount > 0 && played >= RepeatCount) break;
+                    if (UntilAt.HasValue && DateTime.Now >= UntilAt.Value) break;
+                } while (Alive(gen));
             }
             catch (Exception ex)
             {

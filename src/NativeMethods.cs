@@ -29,6 +29,8 @@ namespace AutoClickerTool
         public const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
         public const uint MOUSEEVENTF_WHEEL = 0x0800;
         public const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
+        /// <summary>绝对坐标映射到整个虚拟桌面(多显示器); 缺省只映射到主显示器。</summary>
+        public const uint MOUSEEVENTF_VIRTUALDESK = 0x4000;
 
         public const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
         public const uint KEYEVENTF_KEYUP = 0x0002;
@@ -100,6 +102,29 @@ namespace AutoClickerTool
         [DllImport("shcore.dll")]
         public static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
 
+        /// <summary>按指定 DPI 取系统度量(Win10 1607+); 旧系统会抛 EntryPointNotFoundException, 调用方需兜底。</summary>
+        [DllImport("user32.dll")]
+        public static extern int GetSystemMetricsForDpi(int nIndex, uint dpi);
+
+        // ---- 标题栏(非客户区)自绘: 窗口置顶图钉 ----
+        public const int SM_CXSIZE = 30;      // 标题栏按钮宽度度量
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetWindowDC(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+        public const uint RDW_INVALIDATE = 0x0001;
+        public const uint RDW_UPDATENOW = 0x0100;
+        public const uint RDW_FRAME = 0x0400;
+
+        [DllImport("user32.dll")]
+        public static extern bool RedrawWindow(IntPtr hWnd, IntPtr lprcUpdate, IntPtr hrgnUpdate, uint flags);
+
+        [DllImport("user32.dll")]
+        public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
         /// <summary>每显示器 DPI 感知 v2(-4): 跨显示器移动不再由 DWM 拉伸窗口, 而是由程序自己按新 DPI 重排布局。</summary>
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool SetProcessDpiAwarenessContext(int value);
@@ -132,6 +157,9 @@ namespace AutoClickerTool
 
         [DllImport("user32.dll")]
         public static extern bool ScreenToClient(IntPtr hWnd, ref POINT lpPoint);
+
+        [DllImport("user32.dll")]
+        public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
 
         /// <summary>uMapType: 0=VK→扫描码。</summary>
         [DllImport("user32.dll")]

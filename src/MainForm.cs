@@ -21,6 +21,8 @@ namespace AutoClickerTool
         private readonly SfxManager _sfx = new SfxManager();
         private readonly List<KeyValuePair<string, int>> _keyOptions = new List<KeyValuePair<string, int>>();
         private readonly System.Windows.Forms.Timer _statusTimer;
+        private readonly System.Windows.Forms.Timer _saveTimer;   // 配置写盘节流(250ms 合并连续变化)
+        private bool _savePending;
         private readonly ToolTip _hintTip = new ToolTip();
         private readonly List<string> _loadNotes = new List<string>();
         private AppConfig _cfg;
@@ -43,7 +45,6 @@ namespace AutoClickerTool
         private RadioButton rbFixed;
         private NumericUpDown numX;
         private NumericUpDown numY;
-        private NumericUpDown numRepeat;
         private Button btnClickerToggle;
         private Button btnTestClick;
         private Button btnGetPos;
@@ -51,7 +52,8 @@ namespace AutoClickerTool
 
         // 键盘连按
         private ComboBox cboKey;
-        private TextBox txtKey;
+        private Button btnSpamKey;      // 点击按键: 捕获按键(支持多个键同时按下)
+        private Hotkey _spamHotkey;     // 捕获到的连按按键; null = 用下拉框选择的单键
         private RadioButton rbTap;
         private RadioButton rbHold;
         private NumericUpDown numKeyInterval;
@@ -65,7 +67,6 @@ namespace AutoClickerTool
         private Button btnLoad;
         private Button btnClear;
         private NumericUpDown numSpeed;
-        private CheckBox chkLoop;
         private Label lblEventCount;
         private ListView lstEvents;
         private Button btnEditDelay;
@@ -73,20 +74,13 @@ namespace AutoClickerTool
         private Button btnDeleteEvent;
         private ContextMenuStrip _eventMenu; // 事件列表右键菜单
 
-        // 回放运行限制 + 循环热键提示
-        private NumericUpDown numPlayLoops;
-        private NumericUpDown numPlayMinutes;
-        private CheckBox chkUntilTime;
-        private TextBox txtUntilTime;
+        // 循环热键提示
         private Label lblLoopHint;
 
-        // 连点/连按 运行时长与定时停止
-        private NumericUpDown numClickMinutes;
-        private CheckBox chkClickUntil;
-        private TextBox txtClickUntil;
-        private NumericUpDown numSpamMinutes;
-        private CheckBox chkSpamUntil;
-        private TextBox txtSpamUntil;
+        // 运行限制(三个功能共用同一控件、同一坐标): 指定次数 / 无限循环 / 运行时长(到点, 双向同步)
+        private RunLimitBox _clickLimit;
+        private RunLimitBox _spamLimit;
+        private RunLimitBox _playLimit;
 
         // 宏库页
         private ListView lstMacros;
@@ -156,7 +150,7 @@ namespace AutoClickerTool
             public int Volume;     // 生效音量 0~100
         }
 
-        private CheckBox chkTopmost;
+        private bool _pinHot;                // 标题栏「窗口置顶」图钉是否悬停(非客户区自绘)
         private Label lblHotkeyHint;
         private Label lblStatus;
         private Label lblStatusDot; // 状态栏运行指示点(任一引擎运行 = Run 色, 空闲 = 中性)
@@ -167,6 +161,7 @@ namespace AutoClickerTool
         private CheckBox chkSilentStart;
         private NotifyIcon _trayIcon;
         private ToolStripMenuItem _trayOpen;
+        private ToolStripMenuItem _trayTopmost; // 托盘菜单里的置顶开关(标题栏图钉的备用入口)
         private ToolStripMenuItem _trayExit;
         private Icon _trayAppIcon;         // 从 exe 提取的图标(需手动释放)
         private bool _firstShow = true;   // 静默启动: 拦截首次显示(之后恢复正常)
@@ -214,8 +209,8 @@ namespace AutoClickerTool
             BuildKeyOptions();
             BuildUi();
             WireEvents();
-            // 窗口缩放时重排标签条宽度(不压缩时按文本自然宽度, 无余量堆积)
-            Resize += delegate { LayoutTabStrip(); };
+            // 窗口缩放时重排标签条宽度(不压缩时按文本自然宽度, 无余量堆积); 标题栏图钉位置也要跟着更新
+            Resize += delegate { LayoutTabStrip(); RedrawTitleBar(); };
 
             _clicker.Stopped += () => Ui(() => { UpdateClickerUi(); SetStatus(Lang.T("Clicker stopped")); });
             _spammer.Stopped += () => Ui(() => { UpdateKeyboardUi(); SetStatus(Lang.T("Keyboard spam stopped")); });
@@ -259,6 +254,14 @@ namespace AutoClickerTool
                 UpdateStatusDot(); // 引擎状态可能不经 UpdateAllUi 变化, 轮询兜底刷新指示点
             };
             _statusTimer.Start();
+
+            // 配置写盘节流: 拖动滑块/按住数值箭头时每次变化只标脏, 250ms 安静期后合并写一次
+            _saveTimer = new System.Windows.Forms.Timer { Interval = 250 };
+            _saveTimer.Tick += delegate
+            {
+                _saveTimer.Stop();
+                if (_savePending) { _savePending = false; WriteSettingsNow(); }
+            };
 
             // 首次启动(config.json 不存在): 弹出欢迎窗口选择默认语言 + 功能介绍
             if (!AppConfig.ConfigExists)
@@ -395,28 +398,19 @@ namespace AutoClickerTool
             _fadeOverlay.BringToFront();
         }
 
-        /// <summary>顶栏: 热键提示 + 置顶开关。</summary>
+        /// <summary>顶栏: 热键提示(置顶图钉改为画在标题栏非客户区里, 见 DrawTitleBarPin)。</summary>
         private void BuildTopBar()
         {
             lblHotkeyHint = new Label
             {
                 Location = new Point(Dpi.X(10), Dpi.X(9)),
-                Size = new Size(Dpi.X(405), Dpi.X(18)),
+                Size = new Size(Dpi.X(540), Dpi.X(18)),
                 Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
                 AutoEllipsis = true,
                 ForeColor = Clay.InkSoft,
                 BackColor = Clay.WindowBg
             };
             _topPanel.Controls.Add(lblHotkeyHint);
-            chkTopmost = new ClayCheck
-            {
-                Name = "Topmost",
-                Text = Lang.T("Topmost"),
-                Location = new Point(Dpi.X(432), Dpi.X(8)),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                BackColor = Clay.WindowBg
-            };
-            _topPanel.Controls.Add(chkTopmost);
         }
 
         /// <summary>胶囊标签页条。</summary>
@@ -647,7 +641,7 @@ namespace AutoClickerTool
 
         private void BuildClickerPage(Panel page)
         {
-            var gb = Grp("Click Settings", 10, 10, 540, 148);
+            var gb = Grp("Click Settings", 10, 10, 540, 136);
             // 行1: 间隔 + 鼠标键(英文标签较长, 输入框右移留足间隙)
             gb.Controls.Add(Lbl("Interval (ms):", 15, 33));
             numInterval = new ClayNumericUpDown { Minimum = 1, Maximum = 3600000, Value = 100, BorderStyle = BorderStyle.None };
@@ -657,119 +651,102 @@ namespace AutoClickerTool
             cboButton.Items.AddRange(new object[] { Lang.T("Left"), Lang.T("Right"), Lang.T("Middle") });
             cboButton.SelectedIndex = 0;
             gb.Controls.Add(ClayKit.InputShell(cboButton, 310, 29, 80));
-            // 行2: 次数 + 运行分钟 + 运行到时刻(新增停止条件)
-            gb.Controls.Add(Lbl("Count (0=infinite):", 15, 65));
-            numRepeat = new ClayNumericUpDown { Minimum = 0, Maximum = 100000000, Value = 0, BorderStyle = BorderStyle.None };
-            gb.Controls.Add(ClayKit.InputShell(numRepeat, 140, 61, 60));
-            gb.Controls.Add(Lbl("Run minutes:", 230, 65));
-            numClickMinutes = new ClayNumericUpDown { Minimum = 0, Maximum = 99999, Value = 0, BorderStyle = BorderStyle.None };
-            gb.Controls.Add(ClayKit.InputShell(numClickMinutes, 325, 61, 45));
-            gb.Controls.Add(Lbl("Until:", 375, 65));
-            chkClickUntil = new ClayCheck { Location = new Point(Dpi.X(432), Dpi.X(63)) };
-            txtClickUntil = new TextBox { BorderStyle = BorderStyle.None, Text = "23:59", MaxLength = 5, Enabled = false };
-            gb.Controls.Add(ClayKit.InputShell(txtClickUntil, 458, 61, 55));
-            chkClickUntil.CheckedChanged += delegate { txtClickUntil.Enabled = chkClickUntil.Checked; if (!_applying) SaveSettings(); };
-            // 行3: 跟随/固定坐标
-            rbFollow = new ClayRadio { Name = "Follow cursor", Text = Lang.T("Follow cursor"), Location = new Point(Dpi.X(15), Dpi.X(97)), Checked = true };
-            rbFixed = new ClayRadio { Name = "Fixed position:", Text = Lang.T("Fixed position:"), Location = new Point(Dpi.X(160), Dpi.X(97)) };
-            // 行4: 固定坐标 X/Y + 抓取按钮
+            // 行2: 跟随/固定坐标
+            rbFollow = new ClayRadio { Name = "Follow cursor", Text = Lang.T("Follow cursor"), Location = new Point(Dpi.X(15), Dpi.X(65)), Checked = true };
+            rbFixed = new ClayRadio { Name = "Fixed position:", Text = Lang.T("Fixed position:"), Location = new Point(Dpi.X(160), Dpi.X(65)) };
+            // 行3: 固定坐标 X/Y + 抓取按钮
             numX = new ClayNumericUpDown { Minimum = 0, Maximum = 20000, Value = 0, BorderStyle = BorderStyle.None };
             numY = new ClayNumericUpDown { Minimum = 0, Maximum = 20000, Value = 0, BorderStyle = BorderStyle.None };
-            gb.Controls.Add(ClayKit.InputShell(numX, 160, 117, 70));
-            gb.Controls.Add(ClayKit.InputShell(numY, 245, 117, 70));
-            btnGetPos = new ClayButton { Name = "Get mouse position", Text = Lang.T("Get mouse position"), Location = new Point(Dpi.X(330), Dpi.X(116)), Size = new Size(Dpi.X(140), Dpi.X(26)) };
-            gb.Controls.AddRange(new Control[] { rbFollow, rbFixed, btnGetPos, chkClickUntil });
+            gb.Controls.Add(ClayKit.InputShell(numX, 160, 85, 70));
+            gb.Controls.Add(ClayKit.InputShell(numY, 245, 85, 70));
+            btnGetPos = new ClayButton { Name = "Get mouse position", Text = Lang.T("Get mouse position"), Location = new Point(Dpi.X(330), Dpi.X(84)), Size = new Size(Dpi.X(140), Dpi.X(26)) };
+            gb.Controls.AddRange(new Control[] { rbFollow, rbFixed, btnGetPos });
             page.Controls.Add(gb);
 
-            btnClickerToggle = new ClayButton { Text = Lang.F("Start clicking ({0})", "F6"), Location = new Point(Dpi.X(15), Dpi.X(175)), Size = new Size(Dpi.X(175), Dpi.X(42)), Accent = true, BackColor = Clay.WindowBg };
-            btnTestClick = new ClayButton { Name = "Test", Text = Lang.T("Test"), Location = new Point(Dpi.X(200), Dpi.X(175)), Size = new Size(Dpi.X(100), Dpi.X(42)), Mint = true, BackColor = Clay.WindowBg };
-            lblClickerState = new Label { Text = Lang.T("Status: Idle"), Location = new Point(Dpi.X(310), Dpi.X(188)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
+            // 运行限制: 与「键盘连按」「录制回放」页完全同一坐标(方便三个功能对比调整)
+            var gbRun = Grp("Run options", 10, 158, 540, 118);
+            _clickLimit = new RunLimitBox { Location = new Point(Dpi.X(12), Dpi.X(30)), Size = new Size(Dpi.X(516), Dpi.X(78)) };
+            gbRun.Controls.Add(_clickLimit);
+            page.Controls.Add(gbRun);
+
+            btnClickerToggle = new ClayButton { Text = Lang.F("Start clicking ({0})", "F6"), Location = new Point(Dpi.X(15), Dpi.X(288)), Size = new Size(Dpi.X(175), Dpi.X(42)), Accent = true, BackColor = Clay.WindowBg };
+            btnTestClick = new ClayButton { Name = "Test", Text = Lang.T("Test"), Location = new Point(Dpi.X(200), Dpi.X(288)), Size = new Size(Dpi.X(100), Dpi.X(42)), Mint = true, BackColor = Clay.WindowBg };
+            lblClickerState = new Label { Text = Lang.T("Status: Idle"), Location = new Point(Dpi.X(310), Dpi.X(301)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
             page.Controls.AddRange(new Control[] { btnClickerToggle, btnTestClick, lblClickerState });
 
-            page.Controls.Add(Tip("Tip: move the mouse to the target after starting. Do not click Start while the cursor is on the button,\r\nor it will click the button itself. If the game blocks standard injection, switch method in Advanced.", 12, 232));
+            page.Controls.Add(Tip("Tip: move the mouse to the target after starting. Do not click Start while the cursor is on the button,\r\nor it will click the button itself. If the game blocks standard injection, switch method in Advanced.", 12, 338));
         }
 
         private void BuildKeyboardPage(Panel page)
         {
-            var gb = Grp("Key Settings", 10, 10, 540, 158);
-            gb.Controls.Add(Lbl("Key:", 15, 33));
+            var gb = Grp("Key Settings", 10, 10, 540, 136);
+            // 行1: 按键下拉(单键快捷选择)
+            gb.Controls.Add(Lbl("Key:", 15, 30));
             cboKey = new ClayComboBox();
             foreach (var kv in _keyOptions) cboKey.Items.Add(kv.Key);
             cboKey.SelectedIndex = 0;
-            gb.Controls.Add(ClayKit.InputShell(cboKey, 60, 29, 115));
+            gb.Controls.Add(ClayKit.InputShell(cboKey, 60, 30, 130));
 
-            // 直接输入按键: 免去在下拉列表里逐个翻找
-            gb.Controls.Add(Lbl("or type a key:", 15, 67));
-            txtKey = new TextBox { BorderStyle = BorderStyle.None, MaxLength = 16 };
-            gb.Controls.Add(ClayKit.InputShell(txtKey, 135, 63, 105));
+            // 行2: 「点击按键」——捕获一个按键, 也可以同时按下多个键捕获成组合键(如 Shift+A)
+            gb.Controls.Add(Lbl("Click key:", 15, 60));
+            btnSpamKey = new ClayButton { Text = Lang.T("Click key"), Location = new Point(Dpi.X(115), Dpi.X(56)), Size = new Size(Dpi.X(150), Dpi.X(26)) };
+            gb.Controls.Add(btnSpamKey);
 
-            // 行3: 间隔 + 运行分钟 + 运行到时刻(新增停止条件; 英文标签较长, 输入框右移)
-            gb.Controls.Add(Lbl("Interval (ms):", 15, 101));
+            // 行3: 间隔
+            gb.Controls.Add(Lbl("Interval (ms):", 15, 90));
             numKeyInterval = new ClayNumericUpDown { Minimum = 1, Maximum = 3600000, Value = 100, BorderStyle = BorderStyle.None };
-            gb.Controls.Add(ClayKit.InputShell(numKeyInterval, 110, 97, 80));
-            gb.Controls.Add(Lbl("Run minutes:", 230, 101));
-            numSpamMinutes = new ClayNumericUpDown { Minimum = 0, Maximum = 99999, Value = 0, BorderStyle = BorderStyle.None };
-            gb.Controls.Add(ClayKit.InputShell(numSpamMinutes, 325, 97, 45));
-            gb.Controls.Add(Lbl("Until:", 375, 101));
-            chkSpamUntil = new ClayCheck { Location = new Point(Dpi.X(432), Dpi.X(99)) };
-            txtSpamUntil = new TextBox { BorderStyle = BorderStyle.None, Text = "23:59", MaxLength = 5, Enabled = false };
-            gb.Controls.Add(ClayKit.InputShell(txtSpamUntil, 458, 97, 55));
-            chkSpamUntil.CheckedChanged += delegate { txtSpamUntil.Enabled = chkSpamUntil.Checked; if (!_applying) SaveSettings(); };
+            gb.Controls.Add(ClayKit.InputShell(numKeyInterval, 115, 86, 80));
 
-            // 行4: 点按/按住(英文文案较长, 各占一行位置)
-            rbTap = new ClayRadio { Name = "Tap (click once per interval)", Text = Lang.T("Tap (click once per interval)"), Location = new Point(Dpi.X(15), Dpi.X(129)), Checked = true };
-            rbHold = new ClayRadio { Name = "Hold (until stopped)", Text = Lang.T("Hold (until stopped)"), Location = new Point(Dpi.X(220), Dpi.X(129)) };
-            gb.Controls.AddRange(new Control[] { rbTap, rbHold, chkSpamUntil });
+            // 行4: 点按/按住
+            rbTap = new ClayRadio { Name = "Tap (click once per interval)", Text = Lang.T("Tap (click once per interval)"), Location = new Point(Dpi.X(15), Dpi.X(114)), Checked = true };
+            rbHold = new ClayRadio { Name = "Hold (until stopped)", Text = Lang.T("Hold (until stopped)"), Location = new Point(Dpi.X(220), Dpi.X(114)) };
+            gb.Controls.AddRange(new Control[] { rbTap, rbHold });
             page.Controls.Add(gb);
 
-            btnKeyboardToggle = new ClayButton { Text = Lang.F("Start spam ({0})", "F9"), Location = new Point(Dpi.X(15), Dpi.X(195)), Size = new Size(Dpi.X(170), Dpi.X(42)), Accent = true, BackColor = Clay.WindowBg };
-            lblKeyboardState = new Label { Text = Lang.T("Status: Idle"), Location = new Point(Dpi.X(195), Dpi.X(208)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
+            // 运行限制: 与「鼠标连点」「录制回放」页完全同一坐标
+            var gbRun = Grp("Run options", 10, 158, 540, 118);
+            _spamLimit = new RunLimitBox { Location = new Point(Dpi.X(12), Dpi.X(30)), Size = new Size(Dpi.X(516), Dpi.X(78)) };
+            gbRun.Controls.Add(_spamLimit);
+            page.Controls.Add(gbRun);
+
+            btnKeyboardToggle = new ClayButton { Text = Lang.F("Start spam ({0})", "F9"), Location = new Point(Dpi.X(15), Dpi.X(288)), Size = new Size(Dpi.X(170), Dpi.X(42)), Accent = true, BackColor = Clay.WindowBg };
+            lblKeyboardState = new Label { Text = Lang.T("Status: Idle"), Location = new Point(Dpi.X(195), Dpi.X(301)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
             page.Controls.AddRange(new Control[] { btnKeyboardToggle, lblKeyboardState });
 
-            page.Controls.Add(Tip("Tip: keys go to the foreground window. Switch to the target window first, then toggle with the hotkey.\r\nOr type a key directly: a letter/number, or a name like F1 / Space / Enter.", 12, 252));
+            page.Controls.Add(Tip("Tip: keys go to the foreground window. Switch to the target window first, then toggle with the hotkey.\r\nClick \"Click key\" to capture one key, or press several keys together (e.g. Shift+A) to spam them simultaneously.", 12, 338));
         }
 
         private void BuildMacroPage(Panel page)
         {
-            var gbRec = Grp("Record / Play", 10, 10, 540, 80);
-            btnRecord = new ClayButton { Name = "Start recording", Text = Lang.T("Start recording"), Location = new Point(Dpi.X(15), Dpi.X(27)), Size = new Size(Dpi.X(115), Dpi.X(36)), Accent = true };
-            btnPlay = new ClayButton { Name = "Start playback", Text = Lang.T("Start playback"), Location = new Point(Dpi.X(140), Dpi.X(27)), Size = new Size(Dpi.X(115), Dpi.X(36)), Accent = true };
-            btnSave = new ClayButton { Name = "Save Macro", Text = Lang.T("Save Macro"), Location = new Point(Dpi.X(265), Dpi.X(27)), Size = new Size(Dpi.X(85), Dpi.X(36)) };
-            btnLoad = new ClayButton { Name = "Load Macro", Text = Lang.T("Load Macro"), Location = new Point(Dpi.X(358), Dpi.X(27)), Size = new Size(Dpi.X(87), Dpi.X(36)) };
-            btnClear = new ClayButton { Name = "Clear", Text = Lang.T("Clear"), Location = new Point(Dpi.X(453), Dpi.X(27)), Size = new Size(Dpi.X(58), Dpi.X(36)) };
+            // 卡片标题画在卡片顶部 7~27 的高度上, 所以卡内第一行控件必须从 y>=30 开始, 否则会和标题文字重叠
+            var gbRec = Grp("Record / Play", 10, 10, 540, 136);
+            btnRecord = new ClayButton { Name = "Start recording", Text = Lang.T("Start recording"), Location = new Point(Dpi.X(15), Dpi.X(30)), Size = new Size(Dpi.X(115), Dpi.X(34)), Accent = true };
+            btnPlay = new ClayButton { Name = "Start playback", Text = Lang.T("Start playback"), Location = new Point(Dpi.X(140), Dpi.X(30)), Size = new Size(Dpi.X(115), Dpi.X(34)), Accent = true };
+            btnSave = new ClayButton { Name = "Save Macro", Text = Lang.T("Save Macro"), Location = new Point(Dpi.X(265), Dpi.X(30)), Size = new Size(Dpi.X(85), Dpi.X(34)) };
+            btnLoad = new ClayButton { Name = "Load Macro", Text = Lang.T("Load Macro"), Location = new Point(Dpi.X(358), Dpi.X(30)), Size = new Size(Dpi.X(87), Dpi.X(34)) };
+            btnClear = new ClayButton { Name = "Clear", Text = Lang.T("Clear"), Location = new Point(Dpi.X(453), Dpi.X(30)), Size = new Size(Dpi.X(58), Dpi.X(34)) };
             gbRec.Controls.AddRange(new Control[] { btnRecord, btnPlay, btnSave, btnLoad, btnClear });
+
+            // 第二行: 回放速度 + 循环热键提示(跟随热键设置)
+            gbRec.Controls.Add(Lbl("Speed:", 15, 100));
+            numSpeed = new ClayNumericUpDown { Minimum = 0.1m, Maximum = 10m, Increment = 0.1m, DecimalPlaces = 1, Value = 1m, BorderStyle = BorderStyle.None };
+            gbRec.Controls.Add(ClayKit.InputShell(numSpeed, 85, 96, 70));
+            gbRec.Controls.Add(Lbl("x (1 = original)", 165, 100));
+            lblLoopHint = new Label { Location = new Point(Dpi.X(258), Dpi.X(100)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.CardBg };
+            gbRec.Controls.Add(lblLoopHint);
             page.Controls.Add(gbRec);
 
-            var gbOpt = Grp("Playback Options", 10, 100, 540, 124);
-            gbOpt.Controls.Add(Lbl("Speed:", 15, 32));
-            numSpeed = new ClayNumericUpDown { Minimum = 0.1m, Maximum = 10m, Increment = 0.1m, DecimalPlaces = 1, Value = 1m, BorderStyle = BorderStyle.None };
-            gbOpt.Controls.Add(ClayKit.InputShell(numSpeed, 85, 28, 70));
-            gbOpt.Controls.Add(Lbl("x (1 = original)", 165, 32));
-            chkLoop = new ClayCheck { Name = "Loop playback (until hotkey stops)", Text = Lang.T("Loop playback (until hotkey stops)"), Location = new Point(Dpi.X(260), Dpi.X(30)) };
-            gbOpt.Controls.Add(chkLoop);
-
-            // 运行限制: 循环次数 / 运行分钟数 / 运行到系统时刻
-            gbOpt.Controls.Add(Lbl("Loop count:", 15, 64));
-            numPlayLoops = new ClayNumericUpDown { Minimum = 0, Maximum = 999999, Value = 0, BorderStyle = BorderStyle.None };
-            gbOpt.Controls.Add(ClayKit.InputShell(numPlayLoops, 95, 60, 50));
-            gbOpt.Controls.Add(Lbl("Run minutes:", 155, 64));
-            numPlayMinutes = new ClayNumericUpDown { Minimum = 0, Maximum = 99999, Value = 0, BorderStyle = BorderStyle.None };
-            gbOpt.Controls.Add(ClayKit.InputShell(numPlayMinutes, 240, 60, 45));
-            gbOpt.Controls.Add(Lbl("Until:", 300, 64));
-            chkUntilTime = new ClayCheck { Location = new Point(Dpi.X(330), Dpi.X(62)) };
-            txtUntilTime = new TextBox { BorderStyle = BorderStyle.None, Text = "23:59", MaxLength = 5, Enabled = false };
-            gbOpt.Controls.Add(ClayKit.InputShell(txtUntilTime, 365, 60, 55));
-
-            // 循环回放开/关快捷键提示(跟随热键设置)
-            lblLoopHint = new Label { Location = new Point(Dpi.X(15), Dpi.X(96)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.CardBg };
-            gbOpt.Controls.Add(lblLoopHint);
-            page.Controls.Add(gbOpt);
+            // 运行限制: 与「鼠标连点」「键盘连按」页完全同一坐标(指定次数 / 无限循环 / 运行时长到点)
+            var gbRun = Grp("Run options", 10, 158, 540, 118);
+            _playLimit = new RunLimitBox { Location = new Point(Dpi.X(12), Dpi.X(30)), Size = new Size(Dpi.X(516), Dpi.X(78)) };
+            gbRun.Controls.Add(_playLimit);
+            page.Controls.Add(gbRun);
 
             // 事件列表(虚拟模式: 录制时实时刷新, 20 万条也流畅)
             var lstShell = new ClayPanel
             {
-                Location = new Point(Dpi.X(10), Dpi.X(234)),
-                Size = new Size(Dpi.X(420), Dpi.X(112)),
+                Location = new Point(Dpi.X(10), Dpi.X(288)),
+                Size = new Size(Dpi.X(420), Dpi.X(96)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Inset = true,
                 BackColor = Theme.Current.InputBg
@@ -777,7 +754,7 @@ namespace AutoClickerTool
             lstEvents = new ListView
             {
                 Location = new Point(Dpi.X(4), Dpi.X(4)),
-                Size = new Size(Dpi.X(412), Dpi.X(104)),
+                Size = new Size(Dpi.X(412), Dpi.X(88)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
                 View = View.Details,
                 VirtualMode = true,
@@ -844,15 +821,15 @@ namespace AutoClickerTool
             };
 
             // 事件编辑按钮
-            btnEditDelay = new ClayButton { Name = "Edit delay", Text = Lang.T("Edit delay"), Location = new Point(Dpi.X(440), Dpi.X(234)), Size = new Size(Dpi.X(110), Dpi.X(30)) };
-            btnAddEvent = new ClayButton { Name = "Add event", Text = Lang.T("Add event"), Location = new Point(Dpi.X(440), Dpi.X(266)), Size = new Size(Dpi.X(110), Dpi.X(30)) };
-            btnDeleteEvent = new ClayButton { Name = "Delete selected", Text = Lang.T("Delete selected"), Location = new Point(Dpi.X(440), Dpi.X(298)), Size = new Size(Dpi.X(110), Dpi.X(30)) };
+            btnEditDelay = new ClayButton { Name = "Edit delay", Text = Lang.T("Edit delay"), Location = new Point(Dpi.X(440), Dpi.X(288)), Size = new Size(Dpi.X(110), Dpi.X(30)) };
+            btnAddEvent = new ClayButton { Name = "Add event", Text = Lang.T("Add event"), Location = new Point(Dpi.X(440), Dpi.X(318)), Size = new Size(Dpi.X(110), Dpi.X(30)) };
+            btnDeleteEvent = new ClayButton { Name = "Delete selected", Text = Lang.T("Delete selected"), Location = new Point(Dpi.X(440), Dpi.X(348)), Size = new Size(Dpi.X(110), Dpi.X(30)) };
             page.Controls.AddRange(new Control[] { btnEditDelay, btnAddEvent, btnDeleteEvent });
 
-            lblEventCount = new Label { Text = Lang.F("Events: {0}", 0), Location = new Point(Dpi.X(15), Dpi.X(354)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
+            lblEventCount = new Label { Text = Lang.F("Events: {0}", 0), Location = new Point(Dpi.X(15), Dpi.X(388)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
             page.Controls.Add(lblEventCount);
 
-            page.Controls.Add(Tip("Tip: recording captures mouse moves, clicks, wheel and keys; bound hotkeys and injected clicks are excluded.\r\nLoop count 0 = infinite; run minutes 0 = no limit; Until + time stops at that clock time. After stopping you can edit events: double-click a row or use the right-side buttons.", 12, 372));
+            page.Controls.Add(Tip("Tip: recording captures mouse moves, clicks, wheel and keys; bound hotkeys and injected clicks are excluded.", 12, 408));
         }
 
         private void BuildLibraryPage(Panel page)
@@ -1076,11 +1053,12 @@ namespace AutoClickerTool
         {
             var gb = Grp("Key Sound Effects", 10, 10, 540, 128);
             chkSfx = new ClayCheck { Name = "Enable key sound effects (new key overrides the playing sound)", Text = Lang.T("Enable key sound effects (new key overrides the playing sound)"), Location = new Point(Dpi.X(15), Dpi.X(28)), Checked = true };
-            // 全局音量滑块(英文"Global volume:"较长, 滑块右移到 120)
-            gb.Controls.Add(Lbl("Global volume:", 15, 60));
-            sldGlobalVolume = new ClaySlider { Minimum = 0, Maximum = 100, Value = 100, Location = new Point(Dpi.X(120), Dpi.X(56)), Size = new Size(Dpi.X(150), Dpi.X(22)) };
+            // 全局音效音量(总音量): 单键音量是相对音量, 实际响度 = 两者相乘; 拉到 0 = 全局静音
+            gb.Controls.Add(Lbl("Global SFX volume:", 15, 60));
+            sldGlobalVolume = new ClaySlider { Minimum = 0, Maximum = 100, Value = 100, Location = new Point(Dpi.X(140), Dpi.X(56)), Size = new Size(Dpi.X(150), Dpi.X(22)) };
+            _hintTip.SetToolTip(sldGlobalVolume, Lang.T("Global SFX volume tooltip"));
             gb.Controls.Add(sldGlobalVolume);
-            lblGlobalVol = new Label { Text = "100%", Location = new Point(Dpi.X(278), Dpi.X(60)), AutoSize = true, ForeColor = Clay.Ink, BackColor = Clay.CardBg };
+            lblGlobalVol = new Label { Text = "100%", Location = new Point(Dpi.X(298), Dpi.X(60)), AutoSize = true, ForeColor = Clay.Ink, BackColor = Clay.CardBg };
             gb.Controls.Add(lblGlobalVol);
             btnSfxAdd = new ClayButton { Name = "Add binding", Text = Lang.T("Add binding"), Location = new Point(Dpi.X(15), Dpi.X(88)), Size = new Size(Dpi.X(100), Dpi.X(28)) };
             btnSfxDelete = new ClayButton { Name = "Delete binding", Text = Lang.T("Delete binding"), Location = new Point(Dpi.X(125), Dpi.X(88)), Size = new Size(Dpi.X(105), Dpi.X(28)) };
@@ -1124,6 +1102,7 @@ namespace AutoClickerTool
             // 选中按键音量(单键覆盖全局)
             var lblKeyVolTitle = new Label { Name = "Selected key volume:", Text = Lang.T("Selected key volume:"), Location = new Point(Dpi.X(15), Dpi.X(330)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
             sldKeyVolume = new ClaySlider { Minimum = 0, Maximum = 100, Value = 100, Location = new Point(Dpi.X(150), Dpi.X(326)), Size = new Size(Dpi.X(150), Dpi.X(22)), Enabled = false };
+            _hintTip.SetToolTip(sldKeyVolume, Lang.T("Selected key volume tooltip"));
             lblKeyVol = new Label { Text = "100%", Location = new Point(Dpi.X(308), Dpi.X(330)), AutoSize = true, ForeColor = Clay.Ink, BackColor = Clay.WindowBg };
             page.Controls.AddRange(new Control[] { lblKeyVolTitle, sldKeyVolume, lblKeyVol });
 
@@ -1146,8 +1125,29 @@ namespace AutoClickerTool
             btnAddEvent.Click += delegate { AddEvent(); };
             btnDeleteEvent.Click += delegate { DeleteEvent(); };
             lstEvents.SelectedIndexChanged += delegate { if (!_applying) UpdateEventEditButtons(); };
-            chkUntilTime.CheckedChanged += delegate { txtUntilTime.Enabled = chkUntilTime.Checked; if (!_applying) SaveSettings(); };
-            txtUntilTime.TextChanged += delegate { if (!_applying) SaveSettings(); };
+
+            // 运行限制控件(三个功能共用): 任何改动立即保存, 退出/崩溃后仍能记住上次设置
+            _clickLimit.Changed += delegate { if (!_applying) SaveSettings(); };
+            _spamLimit.Changed += delegate { if (!_applying) SaveSettings(); };
+            _playLimit.Changed += delegate { if (!_applying) SaveSettings(); };
+
+            // 鼠标连点: 所有设置改动即时保存(默认记住上次退出时的状态)
+            numInterval.ValueChanged += delegate { if (!_applying) SaveSettings(); };
+            cboButton.SelectedIndexChanged += delegate { if (!_applying) SaveSettings(); };
+            rbFollow.CheckedChanged += delegate { if (!_applying) SaveSettings(); };
+            rbFixed.CheckedChanged += delegate { if (!_applying) SaveSettings(); };
+            numX.ValueChanged += delegate { if (!_applying) SaveSettings(); };
+            numY.ValueChanged += delegate { if (!_applying) SaveSettings(); };
+
+            // 键盘连按: 所有设置改动即时保存
+            cboKey.SelectedIndexChanged += delegate { if (!_applying) SaveSettings(); };
+            numKeyInterval.ValueChanged += delegate { if (!_applying) SaveSettings(); };
+            rbTap.CheckedChanged += delegate { numKeyInterval.Enabled = rbTap.Checked; if (!_applying) SaveSettings(); };
+            rbHold.CheckedChanged += delegate { if (!_applying) SaveSettings(); };
+            btnSpamKey.Click += delegate { CaptureSpamKey(); };
+
+            // 回放速度
+            numSpeed.ValueChanged += delegate { if (!_applying) SaveSettings(); };
 
             // 宏库页
             lstMacros.SelectedIndexChanged += delegate { if (!_applying) UpdateMacroButtons(); };
@@ -1158,9 +1158,11 @@ namespace AutoClickerTool
             btnProgramRemove.Click += delegate { RemoveProgram(); };
             chkLaunchStart.CheckedChanged += delegate { if (!_applying) SaveSettings(); };
             chkLaunchEnd.CheckedChanged += delegate { if (!_applying) SaveSettings(); };
-            chkTopmost.CheckedChanged += delegate { TopMost = chkTopmost.Checked; };
+
             btnAbout.Click += delegate { using (var f = new AboutForm()) f.ShowDialog(this); };
-            rbTap.CheckedChanged += delegate { numKeyInterval.Enabled = rbTap.Checked; };
+
+            // 点击卡片空白处/标题等非输入区域时, 让输入框失焦(提交数值, 光标不再闪)
+            WireClickToUnfocus(this);
 
             // 高级设置: 改动即时生效
             cboMethod.SelectedIndexChanged += delegate
@@ -1199,11 +1201,9 @@ namespace AutoClickerTool
             {
                 if (_applying || _sfxSliderSync) return;
                 _cfg.SfxVolume = (int)sldGlobalVolume.Value;
-                SfxPlayer.Volume = _cfg.SfxVolume * 10; // 0~100 → MCI 0~1000
                 lblGlobalVol.Text = (int)sldGlobalVolume.Value + "%"; // 与滑块实际值一致(滑块内部有 Clamp)
-                ApplySfxToEngine(); // 重新计算各键生效音量
+                ApplySfxToEngine(); // 全局音量是总音量: 重新计算各键实际音量(拉到 0 = 全局静音)
                 SaveSettings();
-                UpdateKeyVolumeSlider(); // 未单独设音量的选中键跟随全局
             };
             sldKeyVolume.ValueChanged += delegate
             {
@@ -1286,6 +1286,12 @@ namespace AutoClickerTool
 
         private void ApplyLanguage()
         {
+            // 重建下拉框 Items 会触发 SelectedIndexChanged(值瞬时变为 -1), 抑制期间避免误存配置
+            bool prevApplying = _applying;
+            _applying = true;
+            try
+            {
+
             Text = Lang.F("Auto Clicker {0}", VersionInfo.Version);
             ApplyLangWalk(this);
 
@@ -1353,12 +1359,21 @@ namespace AutoClickerTool
             cboTheme.SelectedIndex = Clamp(sel, 0, Theme.All.Length - 1);
 
             if (_trayOpen != null) _trayOpen.Text = Lang.T("Show main window");
+            if (_trayTopmost != null) { _trayTopmost.Text = Lang.T("Topmost"); _trayTopmost.Checked = TopMost; }
             if (_trayExit != null) _trayExit.Text = Lang.T("Exit");
             if (_trayIcon != null) _trayIcon.Text = Lang.F("Auto Clicker {0}", VersionInfo.Version);
+
+            // 「点击按键」按钮文案(按钮 Name 为空, 需手动刷新)
+            UpdateSpamKeyButtonText();
 
             UpdateAllUi();
             RefreshEventList(false);
             Invalidate(true);
+            }
+            finally
+            {
+                _applying = prevApplying;
+            }
         }
 
         private void WalkTheme(Control c, Color parentBg)
@@ -1417,6 +1432,7 @@ namespace AutoClickerTool
             RefreshEventList(false);
             RefreshSfxList();
             ApplyFrameTheme();
+            RedrawTitleBar();
             Invalidate(true);
         }
 
@@ -1572,18 +1588,12 @@ namespace AutoClickerTool
             _clicker.FixedPosition = rbFixed.Checked;
             _clicker.FixedX = (int)numX.Value;
             _clicker.FixedY = (int)numY.Value;
-            _clicker.RepeatCount = (int)numRepeat.Value;
-            string until = chkClickUntil.Checked && txtClickUntil != null ? txtClickUntil.Text.Trim() : "";
-            if (chkClickUntil.Checked && !IsValidTime(until))
-            {
-                SetStatus(Lang.T("Invalid time, use HH:mm format"));
-                return;
-            }
-            _clicker.RunMinutes = (int)numClickMinutes.Value;
-            _clicker.UntilTime = until;
+            _clicker.RepeatCount = _clickLimit.EngineRepeatCount;
+            _clicker.UntilAt = _clickLimit.GetUntilTarget();
             _clicker.Start();
-            Log.Info(string.Format("开始连点: 间隔={0}ms 按键={1} 模式={2} 次数={3}",
-                _clicker.IntervalMs, _clicker.Button, _clicker.FixedPosition ? "固定坐标" : "跟随光标", _clicker.RepeatCount));
+            Log.Info(string.Format("开始连点: 间隔={0}ms 按键={1} 模式={2} 次数={3} 截止={4}",
+                _clicker.IntervalMs, _clicker.Button, _clicker.FixedPosition ? "固定坐标" : "跟随光标",
+                _clicker.RepeatCount, _clicker.UntilAt.HasValue ? _clicker.UntilAt.Value.ToString("HH:mm:ss") : "不限"));
             UpdateClickerUi();
             SetStatus(Lang.F("Clicker running, press {0} to stop", _hotkeys.Describe(HotkeyAction.Clicker)));
         }
@@ -1596,55 +1606,78 @@ namespace AutoClickerTool
                 SetStatus(Lang.T("Stopping keyboard spam..."));
                 return;
             }
-            int vk = ResolveKeyVk();
-            if (vk <= 0)
+            Hotkey combo = CurrentSpamHotkey();
+            if (combo == null || combo.Keys.Count == 0)
             {
-                SetStatus(Lang.T("Key not recognized, please select from the list or type a letter/number"));
+                SetStatus(Lang.T("Key not recognized, click \"Click key\" or pick one from the list"));
                 return;
             }
-            _spammer.Vk = vk;
+            if (HasMouseKey(combo))
+            {
+                // 捕获框能捕获鼠标键, 但注入端按键盘事件发送、系统不会解释成鼠标点击 → 拒绝并提示
+                SetStatus(Lang.T("Mouse buttons cannot be spammed; bind them as hotkeys instead"));
+                return;
+            }
+            _spammer.Combo = combo;
             _spammer.IntervalMs = (int)numKeyInterval.Value;
             _spammer.Mode = rbHold.Checked ? KeySpamMode.Hold : KeySpamMode.Tap;
-            _spammer.ExtendedKey = InputSimulator.IsExtendedKey(vk);
-            string until = chkSpamUntil.Checked && txtSpamUntil != null ? txtSpamUntil.Text.Trim() : "";
-            if (chkSpamUntil.Checked && !IsValidTime(until))
-            {
-                SetStatus(Lang.T("Invalid time, use HH:mm format"));
-                return;
-            }
-            _spammer.RunMinutes = (int)numSpamMinutes.Value;
-            _spammer.UntilTime = until;
+            _spammer.RepeatCount = _spamLimit.EngineRepeatCount;
+            _spammer.UntilAt = _spamLimit.GetUntilTarget();
             _spammer.Start();
-            Log.Info(string.Format("开始连按: VK=0x{0:X2} 间隔={1}ms 模式={2}", vk, _spammer.IntervalMs, _spammer.Mode));
+            Log.Info(string.Format("开始连按: 按键={0} 间隔={1}ms 模式={2} 次数={3}", combo, _spammer.IntervalMs, _spammer.Mode, _spammer.RepeatCount));
             UpdateKeyboardUi();
             SetStatus(Lang.F("Keyboard spam running, press {0} to stop", _hotkeys.Describe(HotkeyAction.Keyboard)));
         }
 
-        /// <summary>
-        /// 解析键盘连按的按键: 输入框有内容时优先按输入解析(按键名或单个字符), 空则用下拉框选择。
-        /// 返回虚拟键码; 无法识别返回 0。
-        /// </summary>
-        private int ResolveKeyVk()
+        /// <summary>组合里是否含鼠标键(0x01~0x06: 左/右/中/X1/X2)——键盘注入无法表达鼠标点击。</summary>
+        private static bool HasMouseKey(Hotkey hk)
         {
-            string t = txtKey != null && txtKey.Text != null ? txtKey.Text.Trim() : "";
-            if (t.Length > 0)
+            if (hk == null) return false;
+            foreach (var k in hk.Keys) if (k >= 0x01 && k <= 0x06) return true;
+            foreach (var m in hk.Modifiers) if (m >= 0x01 && m <= 0x06) return true;
+            return false;
+        }
+
+        /// <summary>当前连按按键: 「点击按键」捕获的按键/组合优先, 否则用下拉框选中的单键。</summary>
+        private Hotkey CurrentSpamHotkey()
+        {
+            if (_spamHotkey != null && _spamHotkey.Keys.Count > 0) return _spamHotkey;
+            if (cboKey.SelectedIndex < 0 || cboKey.SelectedIndex >= _keyOptions.Count) return null;
+            int vk = _keyOptions[cboKey.SelectedIndex].Value;
+            if (vk <= 0) return null;
+            var hk = new Hotkey();
+            hk.Keys.Add(Hotkey.Normalize((uint)vk));
+            return hk;
+        }
+
+        /// <summary>「点击按键」按钮文案: 未捕获时显示提示文字, 已捕获时显示当前按键(新捕获的键会替换旧值)。</summary>
+        private void UpdateSpamKeyButtonText()
+        {
+            if (btnSpamKey == null) return;
+            btnSpamKey.Text = _spamHotkey != null && _spamHotkey.Keys.Count > 0 ? _spamHotkey.ToString() : Lang.T("Click key");
+            btnSpamKey.Invalidate();
+        }
+
+        /// <summary>「点击按键」: 打开捕获框捕获一个按键或多个同时按下的键(如 Shift+A)。</summary>
+        private void CaptureSpamKey()
+        {
+            bool prevCapture = _hotkeys.CaptureActive; // 捕获期间暂停全部热键触发(含 F8/F12); 结束后恢复原状态
+            _hotkeys.CaptureActive = true;
+            try
             {
-                // 1. 名称匹配(与下拉框显示名一致, 忽略大小写): "F1" / "Space" / "Enter" / "CapsLock" ...
-                for (int i = 0; i < _keyOptions.Count; i++)
+                using (var f = new HotkeyCaptureForm(Lang.T("Press the key(s) to spam...\r\nPress one key, or press several keys together (e.g. Shift+A)\r\nRelease all keys to finish, Esc to cancel")))
                 {
-                    if (string.Equals(_keyOptions[i].Key, t, StringComparison.OrdinalIgnoreCase))
-                        return _keyOptions[i].Value;
+                    if (f.ShowDialog(this) != DialogResult.OK || f.Captured == null) return;
+                    _spamHotkey = f.Captured;
+                    UpdateSpamKeyButtonText();
+                    SaveSettings();
+                    SetStatus(Lang.F("Keyboard spam key set to {0}", _spamHotkey));
                 }
-                // 2. 单个字符(字母/数字/符号): 经 VkKeyScan 转虚拟键码(忽略 shift 状态)
-                if (t.Length == 1)
-                {
-                    short s = NativeMethods.VkKeyScan(t[0]);
-                    int vk = s & 0xFF;
-                    if (vk != 0xFF) return vk;
-                }
-                return 0;
             }
-            return _keyOptions[cboKey.SelectedIndex].Value;
+            finally
+            {
+                _hotkeys.CaptureActive = prevCapture;
+            }
         }
 
         private void ToggleRecord()
@@ -1685,37 +1718,22 @@ namespace AutoClickerTool
                 SetStatus(Lang.T("No macro to play, record first"));
                 return;
             }
-            string until = chkUntilTime.Checked && txtUntilTime != null ? txtUntilTime.Text.Trim() : "";
-            if (chkUntilTime.Checked && !IsValidTime(until))
-            {
-                SetStatus(Lang.T("Invalid time, use HH:mm format"));
-                return;
-            }
             _player.Events = _recorder.Snapshot();
             _player.Speed = (double)numSpeed.Value;
-            _player.Loop = chkLoop.Checked;
-            _player.LoopCount = (int)numPlayLoops.Value;
-            _player.RunMinutes = (int)numPlayMinutes.Value;
-            _player.UntilTime = until;
+            _player.RepeatCount = _playLimit.EngineRepeatCount;
+            _player.UntilAt = _playLimit.GetUntilTarget();
             _player.Start();
-            // 回放期间抑制热键与音效: 驱动级注入无 INJECTED 标记, 会触发自己的热键/音效(宏含 F8/F12 会自停/全停)
+            // 回放期间抑制热键与音效: 驱动级注入无 INJECTED 标记, 会触发自己的热键/音效。
+            // 注意 HotkeyManager 对「回放开关(F8)」与「全部停止(F12)」放行, 否则回放开始后按 F8 也停不下来。
             _hotkeys.Suppress = true;
             _sfx.Suppress = true;
-            Log.Info(string.Format("开始回放: 事件={0} 倍速={1} 循环={2} 次数={3} 分钟={4} 直到={5}",
-                _player.Events.Count, _player.Speed, _player.Loop, _player.LoopCount, _player.RunMinutes,
-                string.IsNullOrEmpty(until) ? "不限" : until));
+            Log.Info(string.Format("开始回放: 事件={0} 倍速={1} 次数={2} 截止={3}",
+                _player.Events.Count, _player.Speed, _player.RepeatCount,
+                _player.UntilAt.HasValue ? _player.UntilAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : "不限"));
             if (_cfg.LaunchOnStart) LaunchPrograms();
             UpdateRecordUi();
             UpdatePlayUi();
             SetStatus(Lang.F("Playing... press {0} to stop", _hotkeys.Describe(HotkeyAction.Play)));
-        }
-
-        private static bool IsValidTime(string t)
-        {
-            DateTime dt;
-            return DateTime.TryParseExact(t, "HH:mm",
-                System.Globalization.CultureInfo.InvariantCulture,
-                System.Globalization.DateTimeStyles.None, out dt);
         }
 
         private void StopAll()
@@ -2184,7 +2202,7 @@ namespace AutoClickerTool
         private void CaptureHotkey(int actionIndex)
         {
             var action = (HotkeyAction)actionIndex;
-            _hotkeys.Suppress = true; // 捕获期间暂停触发, 避免按旧热键误触发功能
+            _hotkeys.CaptureActive = true; // 捕获期间暂停全部触发(含 F8/F12), 避免按旧热键误触发功能
             try
             {
                 using (var f = new HotkeyCaptureForm())
@@ -2208,7 +2226,7 @@ namespace AutoClickerTool
             }
             finally
             {
-                _hotkeys.Suppress = false;
+                _hotkeys.CaptureActive = false;
             }
         }
 
@@ -2253,29 +2271,46 @@ namespace AutoClickerTool
 
         // ---------- 按键音效 ----------
 
-        /// <summary>把配置中的音效绑定同步到监听引擎(路径 = Sounds 文件夹 + 文件名 + 各键/组合生效音量)。</summary>
+        /// <summary>
+        /// 把配置中的音效绑定同步到监听引擎(路径 = Sounds 文件夹 + 文件名 + 各键/组合生效音量)。
+        /// 音量语义: 「全局音效音量」是总音量, 单键音量是**相对**音量(默认 100%), 实际音量 = 两者相乘。
+        /// 所以全局音量拉到 0 一定是全局静音, 即使某个键单独设过音量也不会例外。
+        /// </summary>
         private void ApplySfxToEngine()
         {
             _sfx.Enabled = chkSfx.Checked;
-            SfxPlayer.Volume = _cfg.SfxVolume * 10; // 0~100 → MCI 0~1000
             _sfx.Bindings.Clear();
             _sfx.Volumes.Clear();
             _sfx.Combos.Clear();
+
+            int master = Clamp(_cfg.SfxVolume, 0, 100);
             foreach (var kv in _cfg.SfxBindings)
             {
                 int vk;
                 if (!int.TryParse(kv.Key, out vk)) continue;
                 _sfx.Bindings[vk] = Path.Combine(AppConfig.SoundsDir, kv.Value);
-                int perKey = _cfg.SfxBindingVolumes.ContainsKey(kv.Key) ? _cfg.SfxBindingVolumes[kv.Key] : _cfg.SfxVolume;
-                _sfx.Volumes[vk] = perKey * 10; // 0~100 → 0~1000
+                int rel = _cfg.SfxBindingVolumes.ContainsKey(kv.Key) ? _cfg.SfxBindingVolumes[kv.Key] : 100;
+                _sfx.Volumes[vk] = EffectiveSfxVolume(rel, master) * 10; // 0~100 → MCI 0~1000
             }
             foreach (var kv in _cfg.SfxComboBindings)
             {
                 var hk = Hotkey.Parse(kv.Key);
                 if (hk == null) continue;
-                int vol = _cfg.SfxComboVolumes.ContainsKey(kv.Key) ? _cfg.SfxComboVolumes[kv.Key] : _cfg.SfxVolume;
-                _sfx.Combos.Add(new SfxCombo { Combo = hk, Path = Path.Combine(AppConfig.SoundsDir, kv.Value), Volume = vol * 10 });
+                int rel = _cfg.SfxComboVolumes.ContainsKey(kv.Key) ? _cfg.SfxComboVolumes[kv.Key] : 100;
+                _sfx.Combos.Add(new SfxCombo
+                {
+                    Combo = hk,
+                    Path = Path.Combine(AppConfig.SoundsDir, kv.Value),
+                    Volume = EffectiveSfxVolume(rel, master) * 10
+                });
             }
+        }
+
+        /// <summary>单键实际音量 = 单键相对音量 × 全局音效音量 ÷ 100, 结果 0~100。</summary>
+        private static int EffectiveSfxVolume(int perKey, int master)
+        {
+            int v = Clamp(perKey, 0, 100) * Clamp(master, 0, 100) / 100;
+            return Clamp(v, 0, 100);
         }
 
         /// <summary>返回选中的绑定条目(单键或组合键); 未选中返回 null。</summary>
@@ -2322,8 +2357,9 @@ namespace AutoClickerTool
                 string file = kv.Value;
                 int vk;
                 if (!int.TryParse(kv.Key, out vk)) continue;
-                int vol = _cfg.SfxBindingVolumes.ContainsKey(kv.Key) ? _cfg.SfxBindingVolumes[kv.Key] : _cfg.SfxVolume;
-                var sk = new SfxKey { IsCombo = false, Vk = vk, Display = Hotkey.GetName((uint)vk), File = file, Volume = vol };
+                // 单键音量是"相对音量"(默认 100%), 实际响度 = 相对音量 × 全局音效音量
+                int vol = _cfg.SfxBindingVolumes.ContainsKey(kv.Key) ? _cfg.SfxBindingVolumes[kv.Key] : 100;
+                var sk = new SfxKey { IsCombo = false, Vk = vk, Display = Hotkey.GetName((uint)vk), File = file, Volume = Clamp(vol, 0, 100) };
                 _sfxKeys.Add(sk);
                 var lvi = new ListViewItem(new[] { sk.Display, file });
                 lvi.ForeColor = Clay.Ink;
@@ -2332,8 +2368,8 @@ namespace AutoClickerTool
             foreach (var kv in _cfg.SfxComboBindings)
             {
                 string file = kv.Value;
-                int vol = _cfg.SfxComboVolumes.ContainsKey(kv.Key) ? _cfg.SfxComboVolumes[kv.Key] : _cfg.SfxVolume;
-                var sk = new SfxKey { IsCombo = true, Combo = kv.Key, Display = kv.Key, File = file, Volume = vol };
+                int vol = _cfg.SfxComboVolumes.ContainsKey(kv.Key) ? _cfg.SfxComboVolumes[kv.Key] : 100;
+                var sk = new SfxKey { IsCombo = true, Combo = kv.Key, Display = kv.Key, File = file, Volume = Clamp(vol, 0, 100) };
                 _sfxKeys.Add(sk);
                 var lvi = new ListViewItem(new[] { sk.Display, file });
                 lvi.ForeColor = Clay.Ink;
@@ -2426,7 +2462,9 @@ namespace AutoClickerTool
                 SetStatus(Lang.T("Select a sound binding first"));
                 return;
             }
-            SfxPlayer.Play(Path.Combine(AppConfig.SoundsDir, sel.File), sel.Volume * 10);
+            // 与按键播放走同一条常驻线程(不必先试听一次才能出声); 音量同样受全局音量影响
+            int vol = EffectiveSfxVolume(sel.Volume, Clamp(_cfg.SfxVolume, 0, 100));
+            _sfx.TestPlay(Path.Combine(AppConfig.SoundsDir, sel.File), vol * 10);
         }
 
         private void OpenSfxFolder()
@@ -2455,6 +2493,213 @@ namespace AutoClickerTool
         {
             base.OnHandleCreated(e);
             ApplyFrameTheme();
+            RedrawTitleBar();
+        }
+
+        // ---------- 标题栏「窗口置顶」图钉(画在非客户区, 位于最小化按钮左侧) ----------
+
+        private const int WM_NCPAINT = 0x0085;
+        private const int WM_NCACTIVATE = 0x0086;
+        private const int WM_NCHITTEST = 0x0084;
+        private const int HTCLIENT = 1;
+
+        /// <summary>标题栏图钉的矩形(客户区坐标系下, 标题栏区域 y 为负值); 取不到返回空。</summary>
+        private Rectangle PinRectClient()
+        {
+            try
+            {
+                if (!IsHandleCreated) return Rectangle.Empty;
+                NativeMethods.RECT wr;
+                NativeMethods.POINT origin = new NativeMethods.POINT();
+                if (!NativeMethods.GetWindowRect(Handle, out wr)) return Rectangle.Empty;
+                if (!NativeMethods.ClientToScreen(Handle, ref origin)) return Rectangle.Empty;
+                int frameH = origin.y - wr.Top;                 // 上边框 + 标题栏总高度
+                if (frameH <= 8) return Rectangle.Empty;
+                int borderTop = Math.Max(0, ((wr.Right - wr.Left) - ClientSize.Width) / 2); // 系统不可见缩放边框
+                int btnW = CaptionButtonWidth();
+                if (btnW <= 0) return Rectangle.Empty;
+                int count = 1;                                  // 关闭; 再加上最大化/最小化
+                if (MaximizeBox) count++;
+                if (MinimizeBox) count++;
+                int h = frameH - borderTop;               // 可见标题栏高度(去掉不可见缩放边框)
+                int size = h - Dpi.X(4);                  // 图钉直径: 标题栏高度上下各留 2px
+                if (size > btnW - Dpi.X(6)) size = btnW - Dpi.X(6);
+                if (size < 12) size = Math.Min(12, h);
+                if (size < 8) return Rectangle.Empty;
+                int right = ClientSize.Width - count * btnW - Dpi.X(2); // 紧贴最小化按钮左侧(留 2px 间隙)
+                int top = -frameH + borderTop;
+                return new Rectangle(right - size, top + (h - size) / 2, size, size);
+            }
+            catch (Exception)
+            {
+                return Rectangle.Empty;
+            }
+        }
+
+        /// <summary>标题栏标准按钮宽度(SM_CXSIZE, 按窗口 DPI 取值; 旧系统回退到不感知 DPI 的度量)。</summary>
+        private int CaptionButtonWidth()
+        {
+            try
+            {
+                uint dpi = 0;
+                try { dpi = NativeMethods.GetDpiForWindow(Handle); } catch (Exception) { }
+                if (dpi >= 96)
+                {
+                    try
+                    {
+                        int w = NativeMethods.GetSystemMetricsForDpi(NativeMethods.SM_CXSIZE, dpi); // Win10 1607+
+                        if (w > 0) return w;
+                    }
+                    catch (Exception)
+                    {
+                        // 老系统没有该 API, 落到下面的兜底
+                    }
+                }
+                int m = NativeMethods.GetSystemMetrics(NativeMethods.SM_CXSIZE);
+                if (m > 0) return m;
+            }
+            catch (Exception)
+            {
+            }
+            return 0;
+        }
+
+        private static int LoWord(IntPtr v) { return unchecked((short)(long)v); }
+        private static int HiWord(IntPtr v) { return unchecked((short)((long)v >> 16)); }
+
+        /// <summary>图钉命中测试: 在标题栏图钉范围内返回 HTCLIENT, 让系统按客户区派发鼠标消息(这样才能点它)。</summary>
+        private bool PinHitTest(IntPtr lParam)
+        {
+            Rectangle r = PinRectClient();
+            if (r.IsEmpty) return false;
+            var p = new NativeMethods.POINT { x = LoWord(lParam), y = HiWord(lParam) };
+            if (!NativeMethods.ScreenToClient(Handle, ref p)) return false;
+            return r.Contains(p.x, p.y);
+        }
+
+        /// <summary>在窗口 DC 的标题栏区域画图钉。</summary>
+        private void DrawTitleBarPin()
+        {
+            Rectangle r = PinRectClient();
+            if (r.IsEmpty || r.Width <= 2) return;
+            IntPtr hdc = IntPtr.Zero;
+            Graphics g = null;
+            try
+            {
+                hdc = NativeMethods.GetWindowDC(Handle);
+                if (hdc == IntPtr.Zero) return;
+                NativeMethods.RECT wr;
+                NativeMethods.POINT origin = new NativeMethods.POINT();
+                if (!NativeMethods.GetWindowRect(Handle, out wr)) return;
+                if (!NativeMethods.ClientToScreen(Handle, ref origin)) return;
+                g = Graphics.FromHdc(hdc);
+                // 客户区坐标 → 窗口坐标
+                var rc = new Rectangle(r.X + (origin.x - wr.Left), r.Y + (origin.y - wr.Top), r.Width, r.Height);
+                ClayIcons.DrawPin(g, rc, Theme.Current.CardBg, TopMost, _pinHot);
+            }
+            catch (Exception)
+            {
+                // 非客户区绘制失败不影响主功能
+            }
+            finally
+            {
+                if (g != null) g.Dispose();
+                if (hdc != IntPtr.Zero) NativeMethods.ReleaseDC(Handle, hdc);
+            }
+        }
+
+        /// <summary>请求重画窗口边框/标题栏(图钉状态变化、主题切换、缩放变化时调用)。</summary>
+        private void RedrawTitleBar()
+        {
+            try
+            {
+                if (!IsHandleCreated) return;
+                NativeMethods.RedrawWindow(Handle, IntPtr.Zero, IntPtr.Zero,
+                    NativeMethods.RDW_FRAME | NativeMethods.RDW_INVALIDATE | NativeMethods.RDW_UPDATENOW);
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            bool hot = PinRectClient().Contains(e.Location);
+            if (hot != _pinHot)
+            {
+                _pinHot = hot;
+                RedrawTitleBar();
+            }
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            if (_pinHot)
+            {
+                _pinHot = false;
+                RedrawTitleBar();
+            }
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            // 图钉在标题栏(客户区 y 为负), 命中就切换置顶; 不能传给 base, 否则会被当成拖动窗口
+            if (e.Button == MouseButtons.Left && PinRectClient().Contains(e.Location))
+            {
+                SetTopmost(!TopMost);
+                return;
+            }
+            base.OnMouseDown(e);
+        }
+
+        /// <summary>统一设置置顶状态(标题栏图钉 + 托盘菜单共用, 保持两处显示一致)。</summary>
+        private void SetTopmost(bool on)
+        {
+            TopMost = on;
+            if (_trayTopmost != null) _trayTopmost.Checked = on;
+            if (!_applying) SaveSettings();
+            RedrawTitleBar();
+            SetStatus(Lang.T(on ? "Topmost enabled" : "Topmost disabled"));
+        }
+
+        /// <summary>
+        /// 点击卡片空白/标题等非输入区域时让输入框失焦:
+        /// 否则 NumericUpDown/TextBox 会一直保持焦点(光标不停闪), 之后敲的数字还会跑进上一个输入框。
+        /// 失焦会触发 Validate/Leave, 等价于"确认输入", 数值照常保存。
+        /// </summary>
+        private void WireClickToUnfocus(Control root)
+        {
+            foreach (Control c in root.Controls)
+            {
+                if (c is Panel || c is GroupBox || c is Label)
+                    c.Click += delegate { UnfocusInputs(); };
+                WireClickToUnfocus(c);
+            }
+        }
+
+        private void UnfocusInputs()
+        {
+            if (_applying) return;
+            // 从控件树里找真正获得焦点的那个控件(ActiveControl 在嵌套容器下不一定是最内层, 不能只看它)
+            Control focused = FindFocusedControl(this);
+            if (focused is TextBox || focused is NumericUpDown || focused is ComboBox)
+            {
+                try { ActiveControl = null; } // 失焦 → Validate/Leave → 提交当前输入
+                catch (Exception) { try { Focus(); } catch (Exception) { } }
+            }
+        }
+
+        private static Control FindFocusedControl(Control root)
+        {
+            if (root.Focused) return root;
+            foreach (Control c in root.Controls)
+            {
+                Control r = FindFocusedControl(c);
+                if (r != null) return r;
+            }
+            return null;
         }
 
         /// <summary>
@@ -2463,6 +2708,26 @@ namespace AutoClickerTool
         /// </summary>
         protected override void WndProc(ref Message m)
         {
+            if (m.Msg == WM_NCHITTEST)
+            {
+                if (PinHitTest(m.LParam))
+                {
+                    m.Result = (IntPtr)HTCLIENT;
+                    return;
+                }
+            }
+            else if (m.Msg == WM_NCPAINT)
+            {
+                base.WndProc(ref m);
+                DrawTitleBarPin();
+                return;
+            }
+            else if (m.Msg == WM_NCACTIVATE)
+            {
+                base.WndProc(ref m);
+                RedrawTitleBar(); // DWM 激活态重绘后补画图钉
+                return;
+            }
             if (m.Msg == 0x02E0) // WM_DPICHANGED: 按新 DPI 重建界面并应用系统建议的窗口矩形
             {
                 try
@@ -2477,6 +2742,7 @@ namespace AutoClickerTool
                     int borderW = Width - ClientSize.Width;
                     int borderH = Height - ClientSize.Height;
                     Bounds = new Rectangle(rc.Left, rc.Top, Dpi.X(560) + borderW, Dpi.X(530) + borderH);
+                    RedrawTitleBar(); // 标题栏尺寸变了, 图钉位置要跟着重画
                     m.Result = IntPtr.Zero;
                     return;
                 }
@@ -2575,30 +2841,27 @@ namespace AutoClickerTool
                 rbFollow.Checked = !cfg.ClickFixedPosition;
                 numX.Value = Clamp(cfg.ClickFixedX, 0, 20000);
                 numY.Value = Clamp(cfg.ClickFixedY, 0, 20000);
-                numRepeat.Value = Clamp(cfg.ClickRepeatCount, 0, 100000000);
-                numClickMinutes.Value = Clamp(cfg.ClickMinutes, 0, 99999);
-                chkClickUntil.Checked = !string.IsNullOrEmpty(cfg.ClickUntilTime);
-                if (chkClickUntil.Checked) txtClickUntil.Text = cfg.ClickUntilTime;
 
-                txtKey.Text = cfg.SpamKeyText != null ? cfg.SpamKeyText : "";
+                // 键盘连按: 组合键 + 下拉框单键
+                _spamHotkey = string.IsNullOrEmpty(cfg.SpamCombo) ? null : Hotkey.Parse(cfg.SpamCombo);
+                UpdateSpamKeyButtonText();
                 int keyIdx = _keyOptions.FindIndex(kv => kv.Value == cfg.SpamVk);
                 cboKey.SelectedIndex = keyIdx >= 0 ? keyIdx : 0;
                 rbHold.Checked = cfg.SpamHold;
                 rbTap.Checked = !cfg.SpamHold;
                 numKeyInterval.Value = Clamp(cfg.SpamIntervalMs, 1, 3600000);
-                numSpamMinutes.Value = Clamp(cfg.SpamMinutes, 0, 99999);
-                chkSpamUntil.Checked = !string.IsNullOrEmpty(cfg.SpamUntilTime);
-                if (chkSpamUntil.Checked) txtSpamUntil.Text = cfg.SpamUntilTime;
 
                 numSpeed.Value = (decimal)Math.Max((double)numSpeed.Minimum,
                     Math.Min((double)numSpeed.Maximum, cfg.PlaySpeed));
-                chkLoop.Checked = cfg.PlayLoop;
-                numPlayLoops.Value = Clamp(cfg.PlayLoops, 0, 999999);
-                numPlayMinutes.Value = Clamp(cfg.PlayMinutes, 0, 99999);
-                chkUntilTime.Checked = !string.IsNullOrEmpty(cfg.PlayUntilTime);
-                txtUntilTime.Text = string.IsNullOrEmpty(cfg.PlayUntilTime) ? "23:59" : cfg.PlayUntilTime;
-                txtUntilTime.Enabled = chkUntilTime.Checked;
-                chkTopmost.Checked = cfg.Topmost;
+
+                // 运行限制(三个功能共用同一控件)
+                _clickLimit.SetFrom(cfg.ClickLimitMode, cfg.ClickRepeatCount, cfg.ClickSeconds, cfg.ClickUntilAt, cfg.ClickUntilPrimary);
+                _spamLimit.SetFrom(cfg.SpamLimitMode, cfg.SpamRepeatCount, cfg.SpamSeconds, cfg.SpamUntilAt, cfg.SpamUntilPrimary);
+                _playLimit.SetFrom(cfg.PlayLimitMode, cfg.PlayLoops, cfg.PlaySeconds, cfg.PlayUntilAt, cfg.PlayUntilPrimary);
+
+                // 窗口置顶(标题栏图钉的状态就是窗体的 TopMost; 托盘菜单勾选保持同步)
+                TopMost = cfg.Topmost;
+                if (_trayTopmost != null) _trayTopmost.Checked = cfg.Topmost;
                 chkAutoStart.Checked = cfg.AutoStart;
                 chkSilentStart.Checked = cfg.StartMinimized;
 
@@ -2692,7 +2955,17 @@ namespace AutoClickerTool
             chkHumanizeTraj.Enabled = on;
         }
 
+        /// <summary>标脏并请求节流写盘(250ms 合并; 构建早期无定时器时直接写)。</summary>
         private void SaveSettings()
+        {
+            _savePending = true;
+            if (_saveTimer == null) { _savePending = false; WriteSettingsNow(); return; }
+            _saveTimer.Stop();
+            _saveTimer.Start();
+        }
+
+        /// <summary>立即把全部界面状态写进 config.json(节流定时器触发 / 程序退出前调用)。</summary>
+        private void WriteSettingsNow()
         {
             var hk = _hotkeys.GetBinding(HotkeyAction.Clicker);
             if (hk != null) _cfg.ClickerHotkey = hk.ToString();
@@ -2710,35 +2983,35 @@ namespace AutoClickerTool
             _cfg.ClickFixedPosition = rbFixed.Checked;
             _cfg.ClickFixedX = (int)numX.Value;
             _cfg.ClickFixedY = (int)numY.Value;
-            _cfg.ClickRepeatCount = (int)numRepeat.Value;
-            _cfg.ClickMinutes = (int)numClickMinutes.Value;
-            _cfg.ClickUntilTime = chkClickUntil.Checked ? txtClickUntil.Text.Trim() : "";
+            // 连点: 运行限制(模式 / 次数 / 时长 / 截止时刻)
+            _cfg.ClickLimitMode = (int)_clickLimit.Mode;
+            _cfg.ClickRepeatCount = _clickLimit.Mode == RunLimitMode.Count ? _clickLimit.Count : 0;
+            _cfg.ClickSeconds = _clickLimit.Mode == RunLimitMode.Duration ? _clickLimit.Seconds : 0;
+            _cfg.ClickUntilAt = _clickLimit.Mode == RunLimitMode.Duration ? _clickLimit.UntilText : "";
+            _cfg.ClickUntilPrimary = _clickLimit.UntilPrimary;
 
-            string keyText = txtKey.Text == null ? "" : txtKey.Text.Trim();
-            if (keyText.Length > 0)
-            {
-                int vk = ResolveKeyVk();
-                if (vk > 0) _cfg.SpamVk = vk;
-                _cfg.SpamKeyText = keyText;
-            }
-            else
-            {
-                _cfg.SpamVk = _keyOptions[cboKey.SelectedIndex].Value;
-                _cfg.SpamKeyText = "";
-            }
+            // 键盘连按: 组合键 + 下拉框单键
+            _cfg.SpamCombo = _spamHotkey != null && _spamHotkey.Keys.Count > 0 ? _spamHotkey.ToString() : "";
+            _cfg.SpamVk = (cboKey.SelectedIndex >= 0 && cboKey.SelectedIndex < _keyOptions.Count)
+                ? _keyOptions[cboKey.SelectedIndex].Value : 0x41;
+            _cfg.SpamKeyText = "";
             _cfg.SpamIntervalMs = (int)numKeyInterval.Value;
             _cfg.SpamHold = rbHold.Checked;
-            _cfg.SpamMinutes = (int)numSpamMinutes.Value;
-            _cfg.SpamUntilTime = chkSpamUntil.Checked ? txtSpamUntil.Text.Trim() : "";
+            _cfg.SpamLimitMode = (int)_spamLimit.Mode;
+            _cfg.SpamRepeatCount = _spamLimit.Mode == RunLimitMode.Count ? _spamLimit.Count : 0;
+            _cfg.SpamSeconds = _spamLimit.Mode == RunLimitMode.Duration ? _spamLimit.Seconds : 0;
+            _cfg.SpamUntilAt = _spamLimit.Mode == RunLimitMode.Duration ? _spamLimit.UntilText : "";
+            _cfg.SpamUntilPrimary = _spamLimit.UntilPrimary;
 
             _cfg.PlaySpeed = (double)numSpeed.Value;
-            _cfg.PlayLoop = chkLoop.Checked;
-            _cfg.PlayLoops = (int)numPlayLoops.Value;
-            _cfg.PlayMinutes = (int)numPlayMinutes.Value;
-            _cfg.PlayUntilTime = chkUntilTime.Checked ? txtUntilTime.Text.Trim() : "";
+            _cfg.PlayLimitMode = (int)_playLimit.Mode;
+            _cfg.PlayLoops = _playLimit.Mode == RunLimitMode.Count ? _playLimit.Count : 0;
+            _cfg.PlaySeconds = _playLimit.Mode == RunLimitMode.Duration ? _playLimit.Seconds : 0;
+            _cfg.PlayUntilAt = _playLimit.Mode == RunLimitMode.Duration ? _playLimit.UntilText : "";
+            _cfg.PlayUntilPrimary = _playLimit.UntilPrimary;
             _cfg.LaunchOnStart = chkLaunchStart.Checked;
             _cfg.LaunchOnEnd = chkLaunchEnd.Checked;
-            _cfg.Topmost = chkTopmost.Checked;
+            _cfg.Topmost = TopMost;
             _cfg.AutoStart = chkAutoStart.Checked;
             _cfg.StartMinimized = chkSilentStart.Checked;
 
@@ -2879,6 +3152,7 @@ namespace AutoClickerTool
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            if (_savePending) WriteSettingsNow(); // 节流窗口内的最后一次改动也要落盘
             Shutdown();
             base.OnFormClosing(e);
         }
@@ -2906,10 +3180,15 @@ namespace AutoClickerTool
 
             var menu = new ContextMenuStrip();
             _trayOpen = new ToolStripMenuItem { Name = "Show main window", Text = Lang.T("Show main window") };
+            _trayTopmost = new ToolStripMenuItem { Name = "Topmost", Text = Lang.T("Topmost"), CheckOnClick = true, Checked = TopMost };
             _trayExit = new ToolStripMenuItem { Name = "Exit", Text = Lang.T("Exit") };
             _trayOpen.Click += delegate { ShowFromTray(); };
+            _trayTopmost.Click += delegate { SetTopmost(_trayTopmost.Checked); };
             _trayExit.Click += delegate { QuitFromTray(); };
+            // 打开菜单前同步勾选状态(标题栏图钉改过置顶时也不会显示错)
+            menu.Opening += delegate { if (_trayTopmost != null) _trayTopmost.Checked = TopMost; };
             menu.Items.Add(_trayOpen);
+            menu.Items.Add(_trayTopmost);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(_trayExit);
 

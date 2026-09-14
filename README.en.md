@@ -14,9 +14,10 @@ A Windows automation tool for game farming / auto-clicking scenarios. Features a
 
 ## ✨ Features
 
-- 🖱️ **Mouse Clicking** — auto-click at fixed intervals; follow the cursor or lock to coordinates; optional click count limit
-- ⌨️ **Keyboard Spam** — timed tap / hold modes
+- 🖱️ **Mouse Clicking** — auto-click at fixed intervals; follow the cursor or lock to coordinates
+- ⌨️ **Keyboard Spam** — timed tap / hold modes; the "Capture Key" button can capture a single key or **multiple keys pressed together** (e.g. `Shift+A`)
 - ⏺️ **Record & Play** — records real mouse/keyboard actions via global low-level hooks, auto-merges redundant actions (consecutive moves merged into one "move to end point", short presses merged into clicks/key taps); editable, saveable, replayable in loops at variable speed
+- ⏱️ **Run limits** — one run-limit control at the same position on all three pages (clicker / spammer / playback): **repeat N times / infinite loop / run duration (h·min·s) or until a specified time**; duration and deadline stay bidirectionally synced (setting 10 minutes shows local time + 10 min)
 - 🔥 **Global hotkeys** — all 5 function toggles fully customizable, any key combination: multi-key combos (e.g. `Ctrl+Q+W`), mouse side buttons, media keys
 - 🔊 **Key sound effects** — bind any single key / combo to a wav/mp3 sound; plays on press; a new key cuts off the currently playing sound (cut-off playback)
 - 🎭 **Humanization engine** — Gaussian-distributed intervals, landing-point jitter & drift, randomized press duration, bezier movement trajectories to reduce the "scripted" feel
@@ -89,7 +90,7 @@ Common key names: F1~F24, A~Z, 0~9, Esc, Space, Enter, Tab, Backspace, CapsLock,
 
 ## 🎵 Key Sound Effects
 
-On the "Sound FX" page you can bind any single key or combo to a wav/mp3 sound file (automatically copied into the `Sounds` folder). Plays on press; a newly pressed key cuts off the currently playing sound. Supports a master switch, global volume and per-key volume.
+On the "Sound FX" page you can bind any single key or combo to a wav/mp3 sound file (automatically copied into the `Sounds` folder). Plays on press; a newly pressed key cuts off the currently playing sound. Supports a master switch, **global SFX volume** (the master volume) and per-key relative volume; actual loudness = per-key × global (global 0 = fully muted). The audio device is pre-warmed at startup — no need to hit "Test" once first.
 
 ## 📁 Project Structure
 
@@ -100,7 +101,8 @@ On the "Sound FX" page you can bind any single key or combo to a wav/mp3 sound f
 | [src/Humanizer.cs](src/Humanizer.cs) | Humanization engine |
 | [src/HotkeyManager.cs](src/HotkeyManager.cs) | Global hotkey engine (low-level hooks) |
 | [src/MacroRecorder.cs](src/MacroRecorder.cs) / [src/MacroPlayer.cs](src/MacroPlayer.cs) | Macro recording / playback |
-| [src/AutoClicker.cs](src/AutoClicker.cs) / [src/KeyboardSpammer.cs](src/KeyboardSpammer.cs) | Mouse auto-clicker / key spammer engines |
+| [src/AutoClicker.cs](src/AutoClicker.cs) / [src/KeyboardSpammer.cs](src/KeyboardSpammer.cs) | Mouse auto-clicker / key spammer engines (spammer supports multiple keys pressed together) |
+| [src/RunLimit.cs](src/RunLimit.cs) | Shared run-limit control for all three features (count / infinite / duration·deadline bidirectional sync) |
 | [src/SoundFx.cs](src/SoundFx.cs) | Key sound effects |
 | [src/Clay.cs](src/Clay.cs) / [src/Theme.cs](src/Theme.cs) | Owner-drawn control library / 6 themes |
 | [src/Lang.cs](src/Lang.cs) | Chinese / English localization |

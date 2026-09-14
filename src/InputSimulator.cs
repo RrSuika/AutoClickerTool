@@ -232,16 +232,16 @@ namespace AutoClickerTool
         public static void HotkeyDown(Hotkey hk)
         {
             if (hk == null) return;
-            foreach (var m in hk.Modifiers) KeyDown((int)m);
-            foreach (var k in hk.Keys) KeyDown((int)k);
+            foreach (var m in hk.Modifiers) KeyDown((int)m, IsExtendedKey((int)m));
+            foreach (var k in hk.Keys) KeyDown((int)k, IsExtendedKey((int)k));
         }
 
         /// <summary>松开一组组合键(先松触发键, 再松修饰键)。</summary>
         public static void HotkeyUp(Hotkey hk)
         {
             if (hk == null) return;
-            for (int i = hk.Keys.Count - 1; i >= 0; i--) KeyUp((int)hk.Keys[i]);
-            for (int i = hk.Modifiers.Count - 1; i >= 0; i--) KeyUp((int)hk.Modifiers[i]);
+            for (int i = hk.Keys.Count - 1; i >= 0; i--) KeyUp((int)hk.Keys[i], IsExtendedKey((int)hk.Keys[i]));
+            for (int i = hk.Modifiers.Count - 1; i >= 0; i--) KeyUp((int)hk.Modifiers[i], IsExtendedKey((int)hk.Modifiers[i]));
         }
 
         /// <summary>按下一组组合键并释放, 用于回放 Ctrl+C 之类的事件。</summary>
@@ -291,11 +291,16 @@ namespace AutoClickerTool
             int vw = NativeMethods.GetSystemMetrics(NativeMethods.SM_CXVIRTUALSCREEN);
             int vh = NativeMethods.GetSystemMetrics(NativeMethods.SM_CYVIRTUALSCREEN);
             if (vw <= 1 || vh <= 1) return;
-            // 坐标先钳到虚拟屏原点再归一化: 负坐标(副屏在主屏左侧/上方)直接 uint 强转会得到错误值
-            uint fx = (uint)((Math.Max(0, x - vx) * 65535.0) / (vw - 1));
-            uint fy = (uint)((Math.Max(0, y - vy) * 65535.0) / (vh - 1));
+            // 坐标先钳到虚拟屏范围再归一化: 负坐标(副屏在主屏左侧/上方)直接 uint 强转会得到错误值
+            double px = Math.Max(vx, Math.Min(vx + vw - 1, x));
+            double py = Math.Max(vy, Math.Min(vy + vh - 1, y));
+            uint fx = (uint)Math.Round((px - vx) * 65535.0 / (vw - 1));
+            uint fy = (uint)Math.Round((py - vy) * 65535.0 / (vh - 1));
             var input = new NativeMethods.INPUT { type = NativeMethods.INPUT_MOUSE };
-            input.U.mi.dwFlags = NativeMethods.MOUSEEVENTF_MOVE | NativeMethods.MOUSEEVENTF_ABSOLUTE;
+            // 必须带 VIRTUALDESK: 否则 0~65535 只映射到主显示器, 而这里按整个虚拟桌面归一化,
+            // 副屏在主屏左侧/上方(虚拟屏原点非 0,0)时会整体偏移——2K 副屏录制回放"跑到右边"就是这个原因
+            input.U.mi.dwFlags = NativeMethods.MOUSEEVENTF_MOVE | NativeMethods.MOUSEEVENTF_ABSOLUTE
+                                 | NativeMethods.MOUSEEVENTF_VIRTUALDESK;
             input.U.mi.dx = unchecked((int)fx);
             input.U.mi.dy = unchecked((int)fy);
             NativeMethods.SendInput(1, new[] { input }, NativeMethods.INPUT.Size);

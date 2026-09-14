@@ -1103,6 +1103,42 @@ namespace AutoClickerTool
         public override Color SeparatorLight { get { return Clay.Line; } }
     }
 
+    /// <summary>图标绘制工具(标题栏非客户区自绘的「窗口置顶」图钉)。</summary>
+    internal static class ClayIcons
+    {
+        /// <summary>
+        /// 画一枚「图钉」。会先铺一层圆底(用卡片底色/强调色预混), 这样即使系统没有采纳
+        /// 自定义标题栏颜色(DWM 忽略 DWMWA_CAPTION_COLOR 时), 图标也不会因为前景/背景撞色而看不见。
+        /// </summary>
+        public static void DrawPin(Graphics g, Rectangle r, Color cardBg, bool active, bool hot)
+        {
+            if (r.Width <= 2 || r.Height <= 2) return;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            Color fill = active
+                ? Theme.Blend(cardBg, Theme.Current.AccentBottom, 0.80f)
+                : (hot ? Theme.Blend(cardBg, Clay.Line, 0.35f) : cardBg);
+            using (var bp = Clay.Round(new Rectangle(r.X, r.Y, r.Width - 1, r.Height - 1), r.Width / 2))
+            using (var br = new SolidBrush(fill))
+                g.FillPath(br, bp);
+
+            Color fg = active ? Theme.Current.AccentBottom
+                : (Theme.Current.Dark ? Color.FromArgb(235, 255, 255, 255) : Theme.Current.InkSoft);
+
+            float s = Math.Max(1f, Math.Min(r.Width, r.Height) / 22f);
+            float cx = r.X + r.Width / 2f;
+            float top = r.Y + r.Height * 0.18f;
+            float head = 9f * s;
+            using (var br = new SolidBrush(fg))
+                g.FillEllipse(br, cx - head / 2f, top, head, head);
+            using (var br = new SolidBrush(fg))
+                g.FillRectangle(br, cx - 2.6f * s, top + head * 0.70f, 5.2f * s, 2.2f * s);
+            using (var pen = new Pen(fg, 1.9f * s) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                g.DrawLine(pen, cx, top + head * 0.70f + 2.2f * s, cx, r.Y + r.Height - 4f * s);
+        }
+    }
+
+
     /// <summary>构建主题化右键菜单, 文字色跟随主题(切换主题后仍实时取色)。</summary>
     internal static class ClayMenu
     {

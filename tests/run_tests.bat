@@ -4,13 +4,13 @@ rem Covers Hotkey parse/serialize round-trip and AppConfig serialize round-trip 
 cd /d "%~dp0"
 set CSC=C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe
 
-%CSC% /nologo /target:exe /codepage:65001 /out:_tests.exe /r:System.Web.Extensions.dll ..\src\HotkeyManager.cs ..\src\NativeMethods.cs ..\src\Lang.cs ..\src\AppConfig.cs ..\src\Log.cs Tests.cs
+%CSC% /nologo /target:exe /codepage:65001 /out:_tests.exe /r:System.Web.Extensions.dll ..\src\HotkeyManager.cs ..\src\NativeMethods.cs ..\src\Lang.cs ..\src\AppConfig.cs ..\src\Util.cs ..\src\Log.cs Tests.cs
 if %errorlevel% neq 0 (
     echo TEST COMPILE FAILED
     exit /b 1
 )
 
-_tests.exe
+.\_tests.exe
 set code=%errorlevel%
 del _tests.exe >nul 2>nul
 

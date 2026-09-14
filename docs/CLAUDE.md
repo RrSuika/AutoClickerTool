@@ -7,8 +7,9 @@
 Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游戏挂机/自动点击场景。主要功能：
 
 1. **鼠标连点** — 固定间隔自动点击，可选固定坐标或跟随光标、次数限制
-2. **键盘连按** — 定时点按或按住某个键；按键既可从下拉列表选择，也可在"或直接输入按键"输入框直接输入（字母/数字/按键名如 F1、Space，经 `ResolveKeyVk` 解析，输入优先于下拉框）
-3. **录制回放** — 全局低级钩子录制真实鼠标/键盘操作成宏，可编辑、保存、按倍速循环回放；回放支持**循环次数 / 运行分钟数 / 运行到系统时刻**三种停止条件；「宏库」页管理已存宏（▶ 快速触发、重命名、创建副本、删除）并可**自动启动程序**（回放开始/结束时）
+2. **键盘连按** — 定时点按或按住；按键可用下拉框选单个键，或点「点击按键」按钮**捕获**（可捕获多个同时按下的键，如 `Shift+A`，捕获结果用 `Hotkey` 表示、新键替换旧键）
+3. **录制回放** — 全局低级钩子录制真实鼠标/键盘操作成宏，可编辑、保存、按倍速循环回放；「宏库」页管理已存宏（▶ 快速触发、重命名、创建副本、删除）并可**自动启动程序**（回放开始/结束时）
+3.1 **运行限制（连点 / 连按 / 回放 三者统一）** — 三个页面各放一个 `RunLimitBox`（同一 Size/Location，见 `RunLimit.cs`），三个选项：**指定次数 / 无限循环 / 运行时长(时·分·秒) 或 运行到指定时刻**；③ 里“时长”与“截止时刻”双向同步（改时长 → 截止 = 现在+时长；改截止 → 反算时长）
 4. **全局热键** — 5 个功能开关支持任意组合键（含多键组合、鼠标侧键、媒体键）
 5. **按键音效** — 任意按键可绑定 wav/mp3 音效，按键即播、新键覆盖旧音效（覆盖式播放）
 6. **拟人化** — 高斯分布间隔、贝塞尔移动轨迹、落点漂移、点击微拖等，降低"脚本感"被游戏统计检测识别的概率（含总开关）
@@ -33,7 +34,7 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 | 文件 | 职责 |
 |---|---|
 | [Program.cs](../src/Program.cs) | 入口：`EnablePerMonitorDpiAware()`（PMv2 感知，失败回退系统感知）+ 启动 MainForm |
-| [MainForm.cs](../src/MainForm.cs) | **主界面（~1600 行，最大文件）**：6 个胶囊标签页、配置加载/保存、事件列表虚拟模式渲染、各引擎开关的桥接、DPI 同步（SyncDpi）、DWM 边框主题 |
+| [MainForm.cs](../src/MainForm.cs) | **主界面（~3200 行，最大文件）**：7 个胶囊标签页、配置加载/保存、事件列表虚拟模式渲染、各引擎开关的桥接、DPI 同步（SyncDpi）、DWM 边框主题、标题栏非客户区自绘置顶图钉、点击空白处让输入框失焦 |
 | [Clay.cs](../src/Clay.cs) | **自绘控件库**：`Dpi` 缩放、`Clay` 绘制工具（圆角/阴影/渐变）、`ClayKit.InputShell`、`ClayButton`（**文字放不下自动缩字号** FitFont，下限 7pt 后 EndEllipsis）、`ClayCheck`、`ClayRadio`、`ClayGroup`、`ClayPanel`、`ClayNumericUpDown`（自绘▲▼）、`ClayComboBox`（OwnerDraw 自绘下拉）、`ClaySlider`（主题滑块）、`ClayMenuColorTable`/`ClayMenu`（主题右键菜单） |
 | [Theme.cs](../src/Theme.cs) | 6 套主题调色板 + 风格参数（Dark/Glow/Bevel/Radius）。`Theme.Current` 全局单例，控件 OnPaint 实时读取实现换肤 |
 | [Anim.cs](../src/Anim.cs) | **轻量动效引擎**：单个全局 Timer(16ms) 驱动，指数平滑逼近目标值（可中断/可重定向，等效可中断的 ease-out transition）；`Anim.To(setValue, current, target, tauMs)`；`EaseOutCubic`/`EaseInOutCubic`；`Anim.Enabled=false` 时全部瞬时（等效 prefers-reduced-motion）。空闲自动停 Timer |
@@ -48,8 +49,9 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 | [MacroRecorder.cs](../src/MacroRecorder.cs) | **宏录制器**：低级钩子录全局操作。**按键精灵式合并**：连续移动合并为一条"移动到终点"(500ms 停顿阈值)；短按(≤250ms)合并为单击/按键事件；长按保留按下/抬起 |
 | [MacroPlayer.cs](../src/MacroPlayer.cs) | 宏回放线程：按 DelayMs 分段 sleep 后 PlayEvent，支持倍速/循环；Move 事件的轨迹移动从延迟预算中扣除时间；**按住状态是 `Run()` 局部 HeldState**(停止时 finally 补发全部抬起)；「运行到时刻」跨天判定(目标时刻已过=次日)；**代际计数防 Stop→Start 竞态** |
 | [AutoClicker.cs](../src/AutoClicker.cs) | 鼠标连点引擎（后台线程循环，代际计数防竞态） |
-| [KeyboardSpammer.cs](../src/KeyboardSpammer.cs) | 键盘连按引擎（Tap/Hold 两模式，代际计数防竞态） |
-| [SoundFx.cs](../src/SoundFx.cs) | 按键音效：`SfxPlayer`（MCI 播放 wav/mp3，覆盖式：新播放前 stop+close 旧音效）+ `SfxManager`（键盘钩子按绑定表触发，只监听不拦截，过滤注入按键） |
+| [KeyboardSpammer.cs](../src/KeyboardSpammer.cs) | 键盘连按引擎（Tap/Hold 两模式，**用 `Hotkey Combo` 支持多键同时按下**，代际计数防竞态） |
+| [RunLimit.cs](../src/RunLimit.cs) | **三个功能共用的运行限制控件**：`RunLimitMode`(Count/Infinite/Duration) + `RunLimitBox`（指定次数 / 无限循环 / 运行时长↔截止时刻双向同步）。三个页面用**同一 Size/Location** 嵌入（Run options 卡片 y=158 高 118，控件 12,30,516,78），保证位置一致 |
+| [SoundFx.cs](../src/SoundFx.cs) | 按键音效：`SfxPlayer`（MCI 播放 wav/mp3，覆盖式：新播放前 stop+close 旧音效；`WarmUp()` 预热）+ `SfxManager`（键盘钩子按绑定表触发，只监听不拦截，过滤注入按键）。**所有 MCI 调用都在一条常驻线程 `SfxPlayer` 上串行执行**（见坑 28） |
 | [AppConfig.cs](../src/AppConfig.cs) | 配置模型（JavaScriptSerializer 序列化到 `config.json`）+ `MacrosDir`/`SoundsDir` 目录常量与 `EnsureDataDirs()` |
 | [AutoStart.cs](../src/AutoStart.cs) | **开机自启动**：`IsEnabled()`/`SetEnabled(bool)` 写/删 `HKCU\...\CurrentVersion\Run` 的 `AutoClickerTool` 值（值=带引号 exe 路径，失败静默） |
 | [EventEditForms.cs](../src/EventEditForms.cs) | 两个小对话框：`DelayEditForm`（改延迟）、`EventAddForm`（添加宏事件，含单击/按键点按类型） |
@@ -76,7 +78,7 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 - 文本往返：`Hotkey.Parse("Ctrl+Shift+K")` ↔ `ToString()`，双向兼容（显示名如"鼠标X1"、"音量+"也可反解析）
 - `HotkeyManager`：两个低级钩子维护 `_pressed` 集合，新按下的键补全某组合时 `TryFire`（按住期间只触发一次）。只响应非注入输入
 - 录制时 `IsHotkeyKey(vk)` 过滤：vk 出现在任何绑定的 Keys 里就不录
-- **回放期间抑制自触发**：Interception 驱动注入无 INJECTED 标记，`MacroPlayer` 运行时 MainForm 置 `HotkeyManager.Suppress`/`SfxManager.Suppress`，回放结束(Finished)恢复；「全部停止」热键例外始终可用，保证驱动模式下也能停掉回放
+- **回放期间抑制自触发**：Interception 驱动注入无 INJECTED 标记，`MacroPlayer` 运行时 MainForm 置 `HotkeyManager.Suppress`/`SfxManager.Suppress`，回放结束(Finished)恢复；`TryFire` 里 **Play(F8) 与 StopAll(F12) 例外始终放行**——否则回放一开始就停不下来（见坑 26）
 
 ### 4.3 三套注入方式（Advanced 页切换）
 | 方式 | 原理 | 适用 |
@@ -92,7 +94,7 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 
 ### 4.5 按键音效
 - 绑定表存 config：单键 `SfxBindings: Dictionary<string,string>`(键码字符串→文件名) + `SfxBindingVolumes: Dictionary<string,int>`(键码字符串→音量 0~100)——**键必须用字符串**，见坑 13；组合键 `SfxComboBindings: Dictionary<string,string>`(组合串如 "Ctrl+C"→文件名) + `SfxComboVolumes`(组合串→音量)。`SfxManager` 全局键盘钩子监听（**只监听不拦截**，与热键/录制并行），维护 `_down` 归一化按下集合：单键命中 `Bindings` 即播，组合键 `Satisfied()`(所有修饰键+键都按住)即播。**钩子回调只入队**（`Enqueue` 只保留最新一条保持覆盖式语义），后台线程执行 `SfxPlayer.Play(path, volume)`（MCI：新播放前 stop+close 旧的 = 覆盖式，`setaudio <alias> volume to N`，waveaudio 支持、mpegvideo 不支持静默忽略）。过滤注入按键（宏回放不触发音效）；回放期间 `Suppress` 抑制
-- 音效页：总开关 + **全局音量滑块**（`sldGlobalVolume` 0~100 → `SfxVolume`）+ **选中项音量滑块**（`sldKeyVolume`，选中列表项后单独覆盖全局）+ 添加绑定（复用 HotkeyCaptureForm 捕获**单键或组合键**）+ 删除/试听/打开 Sounds 文件夹。统一列表用内部 `SfxKey` 条目(单键/组合键)填充；滑块是自绘 `ClaySlider`（不用系统原生 TrackBar）。`SfxEnabled` 默认**开启**（新安装即生效；老配置保留已存值）
+- 音效页：总开关 + **全局音效音量滑块**（`sldGlobalVolume` 0~100 → `SfxVolume`，总音量）+ **选中项音量滑块**（`sldKeyVolume`，该键的**相对**音量，缺省 100%）+ 添加绑定（复用 HotkeyCaptureForm 捕获**单键或组合键**）+ 删除/试听/打开 Sounds 文件夹。统一列表用内部 `SfxKey` 条目(单键/组合键)填充；滑块是自绘 `ClaySlider`（不用系统原生 TrackBar）。**实际响度 = 单键相对音量 × 全局音效音量 ÷ 100**（`EffectiveSfxVolume`），全局 0 即全局静音。`SfxEnabled` 默认**开启**（新安装即生效；老配置保留已存值）
 
 ### 4.6 主题系统
 - `Theme.Current` 提供全部颜色 + 风格开关（Dark=深色、Glow=霓虹光晕、Bevel=拟物斜面、Radius=圆角）
@@ -126,10 +128,13 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 
 ## 5. UI 结构
 
-- 顶部栏：热键提示文字 + 置顶开关；胶囊标签条（**7 页**：鼠标连点/键盘连按/录制回放/热键/高级设置/音效/宏库）；底部状态栏（`SetStatus()` 写消息，自动加 ToolTip；左侧 `lblStatusDot` 是运行指示点——任一引擎运行 = `Clay.Run` 色、空闲 = `Clay.InkSoft`，由 `UpdateStatusDot()` 刷新，挂在 `UpdateAllUi()` 与 300ms 状态定时器上）
+- 顶部栏：只有热键提示文字；**「窗口置顶」图钉画在标题栏非客户区、最小化按钮左侧**（`MainForm.PinRectClient/DrawTitleBarPin` + `ClayIcons.DrawPin`：`WM_NCPAINT` 自绘、`WM_NCHITTEST` 返回 `HTCLIENT` 以便收到点击，位置用 `SM_CXSIZE` 推算；状态就是窗体的 `TopMost`）；胶囊标签条（**7 页**：鼠标连点/键盘连按/录制回放/热键/高级设置/音效/宏库）；底部状态栏（`SetStatus()` 写消息，自动加 ToolTip；左侧 `lblStatusDot` 是运行指示点——任一引擎运行 = `Clay.Run` 色、空闲 = `Clay.InkSoft`，由 `UpdateStatusDot()` 刷新，挂在 `UpdateAllUi()` 与 300ms 状态定时器上）
 - 分组卡片标题（`ClayGroup.OnPaint`）绘制一枚主题强调色小圆点 + 主墨色（`Clay.Ink`）标题，与卡片内 `InkSoft` 标签形成层级
 - 页面构建函数：`BuildClickerPage / BuildKeyboardPage / BuildMacroPage / BuildHotkeyPage / BuildAdvancedPage / BuildSfxPage / BuildLibraryPage(Panel page)`，签名是 `void Xxx(Panel page)`——**页面由 `BuildUi` 先创建并停靠到 `_contentPanel`，再传给构建函数填充内容**（先停靠再填充，锚点才正确）。宏库页 `BuildLibraryPage` 含已存宏列表（▶ 列快速触发 + 重命名/副本/删除，文件在 `AppConfig.MacrosDir`）+ 软件控制（自动启动程序，`Process.Start`）
-- 回放运行限制在「录制回放」页回放选项卡片：`numPlayLoops`(循环次数 0=无限)、`numPlayMinutes`(运行分钟 0=不限)、`chkUntilTime`+`txtUntilTime`(运行到 HH:mm)，经 `MacroPlayer.LoopCount/RunMinutes/UntilTime` 生效；循环热键提示 `lblLoopHint` 显示当前回放热键
+- **运行限制卡片「Run options」在三个功能页里用完全相同的 `Grp("Run options", 10, 158, 540, 114)` + `RunLimitBox(12,32,516,78)`**（鼠标连点/键盘连按/录制回放），这是刻意的：位置一致方便用户对比调整。三页的顶部设置卡分别是 Click Settings / Key Settings / Record+Play（含回放速度第二行），其余控件（开始按钮、状态、提示）位于卡片下方同一纵坐标
+- **卡片标题占位**：`ClayGroup.OnPaint` 把标题画在卡片顶部 `y≈7~27`，所以**卡内第一行控件必须从 y≥30 开始**，否则标题会和控件文字叠在一起（v2.5 修过这个 bug）
+- 「点击按键」（键盘连按页）用 `HotkeyCaptureForm` 捕获按键/多键组合，结果存 `_spamHotkey`（`Hotkey`），按钮文案由 `UpdateSpamKeyButtonText()` 维护（按钮 `Name` 留空，避免 `ApplyLangWalk` 把捕获到的按键覆盖成提示文字）
+- 循环热键提示 `lblLoopHint` 显示当前回放热键
 - 常用辅助：`Lbl(en,x,y)`/`Tip(en,x,y)`（Name 存英文原文供翻译）、`Grp(en,x,y,w,h)` 分组卡片（锚定 Left|Right，随窗口伸缩）、`ClayKit.InputShell(inner,x,y,w)` 给输入控件套圆角外壳
 - **输入控件一律用 `ClayNumericUpDown` / `ClayComboBox`**（不要用系统原生 NumericUpDown/ComboBox，系统箭头是白色与主题冲突）
 - 新增文案流程：Lang.cs 的 `BuildZh()` 加 `d["English key"] = "中文"`；界面代码用 `Lang.T("English key")`；控件 Name 设英文原文可自动获得语言切换能力（右键菜单项、ListView 列名需在 `ApplyLanguage` 手动刷新）
@@ -158,8 +163,19 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 20. **标签条与按钮文字宽度**：标签条 `LayoutTabStrip()` 按当前语言文本测量所需宽度——放得下时用自然宽度(**只有需要压缩时才按比例分配**, 最后一块吃余量), 放不下等比压缩；构建、`ApplyLanguage`、窗口 `Resize` 时都调用（构建期条宽未布局时用 546 兜底）。`ClayButton` 文字绘制在左右各 6px 内边距的矩形里，放不下自动缩字号（下限 7pt）。新增按钮时无需手工计算文字宽度
 21. **窗口尺寸与 DPI**：`ClientSize = Dpi.X(560)×Dpi.X(530)` 是设计尺寸；`WM_DPICHANGED` 里只采用系统建议的**位置**，尺寸强制回到设计尺寸（否则建议矩形可能与布局宽度不一致, 右侧控件被窗口边缘裁掉）。状态栏「关于」/版本号右锚定、状态文本固定宽+省略号；卡片内控件一律固定坐标（不要右锚定, 否则拉大窗口时被拖走）
 22. **弹窗也要套主题边框**：主窗口与所有对话框（关于/欢迎/热键捕获/事件编辑）共用 `Clay.ApplyFrameTheme(Handle)`（DWM 边框色/标题栏色/深色模式），新加对话框时别漏；任务栏图标 = 主窗口 `Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath)`（与 exe 图标一致）
-23. **连点/连按也支持运行时长与到点停止**：`AutoClicker`/`KeyboardSpammer` 有 `RunMinutes`(0=不限)/`UntilTime`("HH:mm", 空=不限)，解析走 `Util.ParseUntilTime`（跨天=次日, 过夜挂机）；配置字段 `ClickMinutes/ClickUntilTime/SpamMinutes/SpamUntilTime`；三个引擎停止条件检查位置各自在循环体内（Hold 模式按 10ms 粒度检查）
+23. **运行限制统一模型**：三个引擎的停止条件都是 `RepeatCount`(0=无限) + `UntilAt`(DateTime?, null=不限)。
+    - UI 侧：`RunLimitBox`（`RunLimit.cs`）负责三个选项与「时长 ↔ 截止时刻」双向同步，向引擎只暴露 `EngineRepeatCount`/`GetUntilTarget()`；**模式 ③ 下 `RepeatCount=0`（循环轮询）直到截止时刻**。保存 `*UntilPrimary`（用户最近以截止时刻为准）进 config，加载时按该标志决定采纳绝对时刻（过期顺延次日）还是从时长重新锚定——防重启漂移。
+    - **不要恢复 `RunMinutes`/`UntilTime`(string) 那套旧字段**：`AppConfig` 里 `ClickMinutes/ClickUntilTime/SpamMinutes/SpamUntilTime/PlayLoop/PlayMinutes/PlayUntilTime` 仅作 v3→v4 迁移用（`Migrate` 换算成 `*LimitMode/*Seconds/*UntilAt`）。
+    - `Util.ParseUntilTime` 同时接受 "HH:mm"（今天/明天，过夜挂机）与 "yyyy-MM-dd HH:mm:ss"（绝对时刻，字面处理）；**只走 `TryParseExact`**，不要加宽松 `DateTime.TryParse` 兜底（会让用户输入到一半的 "2026-08" 被误判为合法）。
+    - 每个引擎的停止条件检查都在各自循环体内（`KeyboardSpammer` Hold 模式按 10ms 粒度）。
 24. **点击微拖必须复位光标**：`InputSimulator.Click` 的「点击微拖」会在按下/抬起间把真实光标移 ±2px；若不在抬起后复位到按下前位置，「跟随光标」模式下每次点击都累积漂移（用户反映光标越点越往右跑）。抬起后用 `MoveStep(orig.x, orig.y)` 复位即可（微拖本身仍保留，防检测特征不变）
+25. **`SendInput` 绝对坐标必须带 `MOUSEEVENTF_VIRTUALDESK`**：`SendInputMove` 按整个虚拟桌面归一化（`SM_XVIRTUALSCREEN` 等），若不加该标志，系统会把 0~65535 只映射到**主显示器**——主屏不在 (0,0)（副屏在主屏左侧/上方）时回放整体偏移（典型症状：在 2K 副屏录制，回放到主屏坐标系里“靠右”）。改动这里务必保持“归一化范围”与“标志”一致
+26. **回放期间的 `Suppress` 必须放行 F8/F12**：`HotkeyManager.Suppress` 是给驱动级注入（无 INJECTED 标记）做自触发防护的，但它同样会吞掉用户真实按键。若把「回放开关(Play)」也一起抑制，回放一开始就再也停不下来（用户案例：循环 900 次后只能 Ctrl+Alt+Del）。因此 `TryFire` 里 `Suppress` 只抑制 Clicker/Record/Keyboard，**Play 与 StopAll 始终放行**；`MacroRecorder.IsHotkeyKey` 已保证宏里不含已绑定的热键键，代价可接受。**但捕获模式（捕获新热键/连按键）不能用 `Suppress`**——按 F8/F12 会误触发功能：捕获期间用独立的 `CaptureActive` 标志，`TryFire` 里它对全部动作（含 Play/StopAll）暂停。
+27. **钩子回调必须 try/catch + 始终 `CallNextHookEx`**：`HotkeyManager`/`MacroRecorder`/`SfxManager` 的低级钩子回调里，托管异常穿越原生边界会终止进程；并且异常路径也要 `CallNextHookEx`，否则这条输入会被静默吞掉
+28. **MCI 必须在同一条常驻线程上调用**：`mciSendString` 会在调用线程上建立隐藏通知窗口/设备上下文，线程一退出这套上下文就失效 → 第一次播放静默失败、"必须先点一次试听才能出声"。所以 `SfxManager` 启动时开一条**常驻**播放线程，`WarmUp()` + 所有 `Play`（含「试听」）都在这条线程上跑；**不要退回 `ThreadPool.QueueUserWorkItem`**（线程会退出）。`open` 失败要重试一次并把 `mciGetErrorString` 的内容写进 `log.txt`
+29. **音效音量是「乘法」不是「覆盖」**：`SfxVolume`(全局音效音量) 是总音量，`SfxBindingVolumes`(单键) 是**相对**音量(缺省 100)，实际响度 = 两者相乘 ÷ 100。全局 0 = 全局静音。**不要**再把单键音量当成"覆盖全局的绝对值"，否则全局拉 0 仍有键会响；`SfxPlayer.Play` 也要在 `volume<=0` 时直接返回不打开设备
+30. **输入框失焦**：`WireClickToUnfocus` 给页面/卡片/标签挂 Click → `ActiveControl = null`，让 NumericUpDown/TextBox 点击空白处即提交并停止光标闪烁；新增容器时不用管（递归挂），但**不要**给按钮/列表挂（它们本来就抢焦点）
+31. **标题栏自绘（非客户区）**：`WM_NCPAINT` 里 `base` 之后再 `GetWindowDC` 画（画完 `ReleaseDC`），`WM_NCHITTEST` 对图钉范围返回 `HTCLIENT` 才能收到点击；位置用 `SM_CXSIZE`(按 DPI) 从客户区右缘往左推算。非客户区绘制失败要静默兜底，**并且托盘右键菜单里留「窗口置顶」开关作为备用入口**
 
 ## 7. 验证流程
 

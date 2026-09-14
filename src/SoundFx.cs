@@ -16,43 +16,96 @@ namespace AutoClickerTool
         [DllImport("winmm.dll", CharSet = CharSet.Unicode)]
         private static extern int mciSendString(string command, StringBuilder result, int resultLen, IntPtr hwnd);
 
+        [DllImport("winmm.dll", CharSet = CharSet.Unicode)]
+        private static extern bool mciGetErrorString(int errorCode, StringBuilder errorText, int errorTextLen);
+
         private static readonly object Lock = new object();
         private static string _alias;
         private static int _seq;
         private static int _volume = 1000; // 0~1000 (MCI 音量, 1000 = 100%)
 
-        /// <summary>全局音量(0~1000, 1000=100%)。设置后对后续播放生效。</summary>
+        /// <summary>默认音量(0~1000, 1000=100%)。仅 Play(path) 重载使用。</summary>
         public static int Volume
         {
             get { return _volume; }
             set { _volume = Math.Max(0, Math.Min(1000, value)); }
         }
 
-        /// <summary>播放一个音效文件; 会立即打断正在播放的音效(新按键覆盖旧音效)。使用全局音量。</summary>
+        /// <summary>
+        /// 在**播放线程**上预热 MCI: 让 MCI 子系统(设备 + 隐藏通知窗口)在按键发生之前就完成初始化。
+        /// 必须由将来真正调用 Play 的同一个线程调用, 否则第一次播放可能无声(需要先手动"试听"一次)。
+        /// </summary>
+        public static void WarmUp()
+        {
+            lock (Lock)
+            {
+                try
+                {
+                    var sb = new StringBuilder(64);
+                    mciSendString("sysinfo all quantity", sb, sb.Capacity, IntPtr.Zero);
+                }
+                catch (Exception)
+                {
+                    // 老系统/设备缺失时忽略, 不影响后续播放尝试
+                }
+            }
+        }
+
+        /// <summary>播放一个音效文件; 会立即打断正在播放的音效(新按键覆盖旧音效)。使用默认音量。</summary>
         public static void Play(string path)
         {
             Play(path, _volume);
         }
 
-        /// <summary>播放一个音效文件并指定音量(0~1000); 覆盖式播放。</summary>
+        /// <summary>播放一个音效文件并指定音量(0~1000); 覆盖式播放。音量 &lt;= 0 视为静音, 不再打开设备。</summary>
         public static void Play(string path, int volume)
         {
             lock (Lock)
             {
                 Stop();
+                if (volume <= 0) return; // 音量 0 = 静音(含全局音量为 0)
                 if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
                 int n = Interlocked.Increment(ref _seq);
                 string alias = "sfx" + n;
                 // 按扩展名选 MCI 设备类型; 不支持的格式 open 失败, 静默忽略
                 string type = path.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) ? "waveaudio" : "mpegvideo";
                 string p = path.Replace("\"", "");
-                if (mciSendString(string.Format("open \"{0}\" type {1} alias {2}", p, type, alias), null, 0, IntPtr.Zero) != 0)
-                    return;
+                int rc = Open(p, type, alias);
+                if (rc != 0)
+                {
+                    // 部分系统上第一次 open 会失败(设备尚未就绪), 重试一次;
+                    // 重试仍失败才把 MCI 错误码与文字写进日志(第一次失败是已知的暂时现象, 不算错误)
+                    rc = Open(p, type, alias);
+                    if (rc != 0)
+                    {
+                        Log.Warn("音效打开失败(" + rc + "): " + ErrorText(rc) + " - " + p);
+                        return;
+                    }
+                }
                 // 应用音量(0~1000; waveaudio 支持, 不支持音量的设备静默忽略)
                 mciSendString(string.Format("setaudio {0} volume to {1}", alias, Math.Max(0, Math.Min(1000, volume))), null, 0, IntPtr.Zero);
                 mciSendString(string.Format("play {0} notify", alias), null, 0, IntPtr.Zero);
                 _alias = alias;
             }
+        }
+
+        private static int Open(string path, string type, string alias)
+        {
+            return mciSendString(string.Format("open \"{0}\" type {1} alias {2}", path, type, alias), null, 0, IntPtr.Zero);
+        }
+
+        /// <summary>MCI 错误码 → 可读文字(取不到时返回空串)。</summary>
+        private static string ErrorText(int code)
+        {
+            try
+            {
+                var sb = new StringBuilder(256);
+                if (mciGetErrorString(code, sb, sb.Capacity)) return sb.ToString();
+            }
+            catch (Exception)
+            {
+            }
+            return "";
         }
 
         /// <summary>停止并释放当前音效。</summary>
@@ -93,7 +146,9 @@ namespace AutoClickerTool
         private readonly HashSet<uint> _down = new HashSet<uint>(); // 当前按住的键(归一化)
         private readonly Queue<SfxJob> _jobs = new Queue<SfxJob>();
         private readonly object _qLock = new object();
-        private bool _pumpRunning;
+        private Thread _worker;                    // 常驻播放线程: 所有 MCI 调用都在它上面执行
+        private readonly AutoResetEvent _wake = new AutoResetEvent(false);
+        private volatile bool _workerStop;
         private bool _disposed;
 
         /// <summary>总开关。</summary>
@@ -118,10 +173,57 @@ namespace AutoClickerTool
 
         public void Start()
         {
-            if (_kbHook != IntPtr.Zero || _disposed) return;
-            _kbHook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_KEYBOARD_LL, _kbProc,
-                NativeMethods.GetModuleHandle(null), 0);
-            if (_kbHook == IntPtr.Zero) Log.Warn("音效钩子安装失败");
+            if (_disposed) return;
+            if (_kbHook == IntPtr.Zero)
+            {
+                _kbHook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_KEYBOARD_LL, _kbProc,
+                    NativeMethods.GetModuleHandle(null), 0);
+                if (_kbHook == IntPtr.Zero) Log.Warn("音效钩子安装失败");
+            }
+            StartWorker(); // 启动常驻播放线程并在其上预热 MCI, 保证开机后第一次按键就能出声
+        }
+
+        /// <summary>启动常驻播放线程(MCI 的隐藏通知窗口/设备上下文绑定在这个线程上, 线程存活才能稳定播放)。</summary>
+        private void StartWorker()
+        {
+            if (_worker != null || _disposed) return;
+            _workerStop = false;
+            _worker = new Thread(WorkerLoop) { IsBackground = true, Name = "SfxPlayer" };
+            _worker.Start();
+        }
+
+        private void WorkerLoop()
+        {
+            try { SfxPlayer.WarmUp(); } catch (Exception) { }
+            while (!_workerStop)
+            {
+                PlayLatest();
+                try { _wake.WaitOne(200); } catch (Exception) { }
+            }
+            PlayLatest();
+        }
+
+        /// <summary>取出并播放最新一条(队列只保留最新, 实现"新键覆盖旧音效")。</summary>
+        private void PlayLatest()
+        {
+            SfxJob job = null;
+            lock (_qLock)
+            {
+                if (_jobs.Count > 0)
+                {
+                    job = _jobs.Dequeue();
+                    _jobs.Clear();
+                }
+            }
+            if (job == null) return;
+            try
+            {
+                SfxPlayer.Play(job.Path, job.Volume);
+            }
+            catch (Exception ex)
+            {
+                try { Log.Warn("音效播放异常: " + ex.Message); } catch (Exception) { }
+            }
         }
 
         private bool Satisfied(Hotkey hk)
@@ -132,38 +234,22 @@ namespace AutoClickerTool
             return true;
         }
 
+        /// <summary>入队一条播放请求(只保留最新一条, 保持"新键覆盖旧音效")。</summary>
         private void Enqueue(string path, int volume)
         {
+            if (_disposed) return;
             lock (_qLock)
             {
-                while (_jobs.Count > 0) _jobs.Dequeue(); // 只保留最新一条, 保持"新键覆盖旧音效"
+                _jobs.Clear();
                 _jobs.Enqueue(new SfxJob { Path = path, Volume = volume });
-                if (_pumpRunning) return;
-                _pumpRunning = true;
             }
-            ThreadPool.QueueUserWorkItem(Pump);
+            try { _wake.Set(); } catch (Exception) { }
         }
 
-        /// <summary>后台线程串行播放队列(与 SfxPlayer 的锁一起串行化 MCI 调用)。</summary>
-        private void Pump(object state)
+        /// <summary>「试听」: 与按键播放走同一条常驻线程, 保证 MCI 状态一致(不必先试听才能出声)。</summary>
+        public void TestPlay(string path, int volume)
         {
-            try
-            {
-                while (true)
-                {
-                    SfxJob job = null;
-                    lock (_qLock)
-                    {
-                        if (_jobs.Count == 0) { _pumpRunning = false; return; }
-                        job = _jobs.Dequeue();
-                    }
-                    if (job != null) SfxPlayer.Play(job.Path, job.Volume);
-                }
-            }
-            catch (Exception ex)
-            {
-                try { Log.Warn("音效播放队列异常: " + ex.Message); } catch (Exception) { }
-            }
+            Enqueue(path, volume);
         }
 
         private IntPtr KeyboardProc(int nCode, IntPtr wParam, IntPtr lParam)
@@ -218,6 +304,13 @@ namespace AutoClickerTool
             _disposed = true;
             if (_kbHook != IntPtr.Zero) NativeMethods.UnhookWindowsHookEx(_kbHook);
             _kbHook = IntPtr.Zero;
+            _workerStop = true;
+            try { _wake.Set(); } catch (Exception) { }
+            Thread w = _worker;
+            if (w != null && w != Thread.CurrentThread)
+            {
+                try { w.Join(500); } catch (Exception) { }
+            }
             SfxPlayer.Stop();
         }
     }

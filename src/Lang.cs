@@ -22,6 +22,8 @@ namespace AutoClickerTool
             d["Ready"] = "就绪";
             d["{0} · Settings auto-save"] = "{0} · 设置自动保存";
             d["Topmost"] = "窗口置顶";
+            d["Topmost enabled"] = "已置顶: 窗口始终显示在最前面";
+            d["Topmost disabled"] = "已取消置顶";
             d["Confirm"] = "确认";
             d["Error"] = "错误";
             d["OK"] = "确定";
@@ -75,6 +77,30 @@ namespace AutoClickerTool
             d["Key not recognized, please select from the list or type a letter/number"] = "无法识别该按键: 请从列表选择, 或输入字母/数字/按键名(如 F1、Space、Enter)";
             d["Tip: keys go to the foreground window. Switch to the target window first, then toggle with the hotkey.\r\nOr type a key directly: a letter/number, or a name like F1 / Space / Enter."]
                 = "提示: 按键发往当前活动窗口。开始前请先切换到目标窗口，再用热键开关。\r\n也可以直接输入按键: 字母/数字, 或输入下拉列表中的按键名(如 F1、Space、Enter)。";
+            d["Click key:"] = "点击按键:";
+            d["Click key"] = "点击按键";
+            d["Key not recognized, click \"Click key\" or pick one from the list"] = "无法识别按键: 请点「点击按键」捕获, 或从下拉列表里选择";
+            d["Keyboard spam key set to {0}"] = "连按按键已设为 {0}";
+            d["Press the key(s) to spam...\r\nPress one key, or press several keys together (e.g. Shift+A)\r\nRelease all keys to finish, Esc to cancel"]
+                = "请按下要连按的按键...\r\n可以按一个键, 也可以同时按下多个键(如 Shift+A)\r\n全部松开后完成设置, Esc 取消";
+            d["Tip: keys go to the foreground window. Switch to the target window first, then toggle with the hotkey.\r\nClick \"Click key\" to capture one key, or press several keys together (e.g. Shift+A) to spam them simultaneously."]
+                = "提示: 按键发往当前活动窗口。开始前请先切换到目标窗口, 再用热键开关。\r\n点「点击按键」可捕获一个键; 同时按多个键(如 Shift+A)即可一次连按多个键。";
+
+            // 运行限制(鼠标连点 / 键盘连按 / 录制回放 三个功能共用同一控件与同一位置)
+            d["Run options"] = "运行选项";
+            d["Repeat count:"] = "指定次数:";
+            d["Infinite loop"] = "无限循环";
+            d["Run for:"] = "运行时长:";
+            d["h"] = "时";
+            d["m"] = "分";
+            d["s"] = "秒";
+            d["Loop playback hotkey: {0}"] = "回放开关: 按 {0} 开始/停止回放";
+            d["Tip: recording captures mouse moves, clicks, wheel and keys; bound hotkeys and injected clicks are excluded.\r\nAfter stopping you can edit events: double-click a row or use the buttons on the right."]
+                = "提示: 录制包含鼠标移动与按键, 已绑定的热键与程序自身注入的点击不会被录进宏。\r\n停止后可编辑事件: 双击某行改延迟, 或用右侧按钮添加/删除。";
+            d["Tip: recording captures mouse moves, clicks, wheel and keys; bound hotkeys and injected clicks are excluded."]
+                = "提示: 录制包含鼠标移动与按键; 已绑定的热键与程序自身注入的点击不会被录进宏。";
+            d["Tip: recording captures mouse moves, clicks, wheel and keys; bound hotkeys and injected clicks are excluded.\r\nAfter stopping you can edit events with the buttons on the right."]
+                = "提示: 录制包含鼠标移动与按键, 已绑定的热键与程序自身注入的点击不会被录进宏。\r\n停止后可编辑事件: 双击列表某行改延迟, 或用右侧按钮添加/删除。";
 
             // 按键名
             d["Space"] = "空格 Space";
@@ -136,7 +162,6 @@ namespace AutoClickerTool
             d["Run minutes:"] = "运行分钟:";
             d["Until:"] = "直到:";
             d["Invalid time, use HH:mm format"] = "时间格式无效, 请用 HH:mm (如 23:59)";
-            d["Loop playback hotkey: {0}"] = "循环回放: 按 {0} 开始/停止回放";
             d["Events: {0}"] = "已录制事件:{0}";
             d["Recording live view ({0} shown)"] = "正在录制, 实时显示最近 {0} 条";
             d["Delay(ms)"] = "延迟(ms)";
@@ -305,14 +330,18 @@ namespace AutoClickerTool
             d["Open sounds folder"] = "打开音效文件夹";
             d["Volume:"] = "音量:";
             d["Global volume:"] = "全局音量:";
+            d["Global SFX volume:"] = "全局音效音量:";
+            d["Global SFX volume tooltip"] = "总音量: 每个按键的实际响度 = 该键相对音量 × 全局音效音量。\r\n拉到 0 即全局静音(即使某个键单独设过音量)。";
             d["Selected key volume:"] = "选中按键音量:";
+            d["Selected key volume tooltip"] = "选中按键的相对音量(0~100%): 再乘以全局音效音量才是实际响度。";
             d["Sound file"] = "音效文件";
             d["Bindings: {0}"] = "绑定数量: {0}";
             d["Tip: assign a sound to any key; pressing the key plays the sound, and a newly pressed bound key overrides the currently playing one.\r\nPut sound files (wav/mp3) into the Sounds folder next to this program."]
-                = "提示: 给任意按键绑定音效, 按下该键即播放; 新按下的已绑定键会打断正在播放的音效(覆盖式播放)。\r\n把 wav/mp3 音效文件放进本程序目录的 Sounds 文件夹。";
+                = "提示: 给任意按键绑定音效, 按下该键即播放; 新按下的已绑定键会打断正在播放的音效(覆盖式播放)。\r\n把 wav/mp3 音效文件放进本程序目录的 Sounds 文件夹。\r\n音量: 实际响度 = 单键相对音量 × 全局音效音量(全局拉到 0 即静音)。";
             d["Press the single key to bind a sound...\r\nOnly a single non-modifier keyboard key is supported\r\nRelease the key to finish, Esc to cancel"]
                 = "请按下要绑定音效的单个按键...\r\n仅支持单个普通键盘键(不支持 Ctrl/Alt 等修饰键)\r\n松开按键完成设置, Esc 取消";
             d["Only a single non-modifier key is supported for sound binding"] = "音效绑定仅支持单个非修饰键";
+            d["Mouse buttons cannot be spammed; bind them as hotkeys instead"] = "鼠标键不能用于连按, 请把它们绑定为热键使用";
             d["Sound bound: {0} → {1}"] = "已绑定音效: {0} → {1}";
             d["Press a key or combo to bind a sound...\r\nSingle key, or Ctrl/Alt/Shift/Win combos (e.g. Ctrl+C)\r\nRelease all keys to finish, Esc to cancel"]
                 = "请按下要绑定音效的按键或组合键...\r\n支持单个按键, 或 Ctrl/Alt/Shift/Win 组合键(如 Ctrl+C)\r\n松开全部按键完成设置, Esc 取消";

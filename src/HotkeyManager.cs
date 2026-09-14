@@ -301,8 +301,11 @@ namespace AutoClickerTool
         private IntPtr _mouseHook;
         private bool _disposed;
 
-        /// <summary>捕获新热键期间置 true, 暂停触发动作。</summary>
+        /// <summary>回放期间置 true, 抑制热键触发(驱动级注入无 INJECTED 标记, 会自触发); F8/F12 例外放行。</summary>
         public volatile bool Suppress = false;
+
+        /// <summary>捕获新热键/新按键期间置 true, 暂停全部触发(含 F8/F12——捕获框里按这些键不能误触发功能)。</summary>
+        public volatile bool CaptureActive = false;
 
         public HotkeyManager()
         {
@@ -410,8 +413,14 @@ namespace AutoClickerTool
                 if (Satisfied(hk))
                 {
                     _fired.Add(kv.Key);
-                    // 回放期间抑制(驱动级注入自触发), 但"全部停止"始终可用, 保证驱动模式下也能停掉回放
-                    if (Suppress && kv.Key != HotkeyAction.StopAll) continue;
+                    // 捕获期间: 全部暂停(按 F8/F12 也不能触发功能)
+                    if (CaptureActive) continue;
+                    // 回放期间抑制(驱动级注入无 INJECTED 标记, 会自触发)。
+                    // 但「回放开关」(F8) 与「全部停止」(F12) 必须始终放行:
+                    //   1) 一并抑制的话, 驱动模式下开始回放后就再也停不下来(用户按物理键同样被吞掉);
+                    //   2) 录制端 MacroRecorder.IsHotkeyKey 已把已绑定的热键键排除在宏之外,
+                    //      放行它们基本不会被宏里的按键自触发。
+                    if (Suppress && kv.Key != HotkeyAction.StopAll && kv.Key != HotkeyAction.Play) continue;
                     Fire(kv.Key);
                 }
             }
@@ -432,60 +441,75 @@ namespace AutoClickerTool
 
         private IntPtr KeyboardProc(int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if (nCode >= 0)
+            // 托管异常穿越原生回调边界会终止进程; 钩子回调必须整体兜底(且始终 CallNextHookEx, 否则会吞掉用户输入)
+            try
             {
-                var info = (NativeMethods.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.KBDLLHOOKSTRUCT));
-                bool up = (int)wParam == NativeMethods.WM_KEYUP || (int)wParam == NativeMethods.WM_SYSKEYUP;
-                if (up)
+                if (nCode >= 0)
                 {
-                    OnRelease(Hotkey.Normalize(info.vkCode));
-                }
-                else if ((info.flags & LLKHF_INJECTED) == 0) // 忽略注入按键, 防止自触发
-                {
-                    uint n = Hotkey.Normalize(info.vkCode);
-                    if (!_pressed.Contains(n))
+                    var info = (NativeMethods.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.KBDLLHOOKSTRUCT));
+                    bool up = (int)wParam == NativeMethods.WM_KEYUP || (int)wParam == NativeMethods.WM_SYSKEYUP;
+                    if (up)
                     {
-                        _pressed.Add(n);
-                        TryFire(n);
+                        OnRelease(Hotkey.Normalize(info.vkCode));
+                    }
+                    else if ((info.flags & LLKHF_INJECTED) == 0) // 忽略注入按键, 防止自触发
+                    {
+                        uint n = Hotkey.Normalize(info.vkCode);
+                        if (!_pressed.Contains(n))
+                        {
+                            _pressed.Add(n);
+                            TryFire(n);
+                        }
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                try { Log.Warn("热键键盘钩子异常: " + ex.Message); } catch (Exception) { }
             }
             return NativeMethods.CallNextHookEx(_kbHook, nCode, wParam, lParam);
         }
 
         private IntPtr MouseProc(int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if (nCode >= 0)
+            try
             {
-                var info = (NativeMethods.MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.MSLLHOOKSTRUCT));
-                uint vk = 0;
-                bool up = false;
-                switch ((int)wParam)
+                if (nCode >= 0)
                 {
-                    case NativeMethods.WM_LBUTTONDOWN: vk = 0x01; break;
-                    case NativeMethods.WM_LBUTTONUP: vk = 0x01; up = true; break;
-                    case NativeMethods.WM_RBUTTONDOWN: vk = 0x02; break;
-                    case NativeMethods.WM_RBUTTONUP: vk = 0x02; up = true; break;
-                    case NativeMethods.WM_MBUTTONDOWN: vk = 0x04; break;
-                    case NativeMethods.WM_MBUTTONUP: vk = 0x04; up = true; break;
-                    case NativeMethods.WM_XBUTTONDOWN: vk = ((info.mouseData >> 16) & 0xFFFF) == 1 ? 0x05u : 0x06u; break;
-                    case NativeMethods.WM_XBUTTONUP: vk = ((info.mouseData >> 16) & 0xFFFF) == 1 ? 0x05u : 0x06u; up = true; break;
-                }
-                if (vk != 0)
-                {
-                    if (up)
+                    var info = (NativeMethods.MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.MSLLHOOKSTRUCT));
+                    uint vk = 0;
+                    bool up = false;
+                    switch ((int)wParam)
                     {
-                        OnRelease(vk);
+                        case NativeMethods.WM_LBUTTONDOWN: vk = 0x01; break;
+                        case NativeMethods.WM_LBUTTONUP: vk = 0x01; up = true; break;
+                        case NativeMethods.WM_RBUTTONDOWN: vk = 0x02; break;
+                        case NativeMethods.WM_RBUTTONUP: vk = 0x02; up = true; break;
+                        case NativeMethods.WM_MBUTTONDOWN: vk = 0x04; break;
+                        case NativeMethods.WM_MBUTTONUP: vk = 0x04; up = true; break;
+                        case NativeMethods.WM_XBUTTONDOWN: vk = ((info.mouseData >> 16) & 0xFFFF) == 1 ? 0x05u : 0x06u; break;
+                        case NativeMethods.WM_XBUTTONUP: vk = ((info.mouseData >> 16) & 0xFFFF) == 1 ? 0x05u : 0x06u; up = true; break;
                     }
-                    else if ((info.flags & LLMHF_INJECTED) == 0)
+                    if (vk != 0)
                     {
-                        if (!_pressed.Contains(vk))
+                        if (up)
                         {
-                            _pressed.Add(vk);
-                            TryFire(vk);
+                            OnRelease(vk);
+                        }
+                        else if ((info.flags & LLMHF_INJECTED) == 0)
+                        {
+                            if (!_pressed.Contains(vk))
+                            {
+                                _pressed.Add(vk);
+                                TryFire(vk);
+                            }
                         }
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                try { Log.Warn("热键鼠标钩子异常: " + ex.Message); } catch (Exception) { }
             }
             return NativeMethods.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
         }

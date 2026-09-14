@@ -306,69 +306,85 @@ namespace AutoClickerTool
 
         private IntPtr MouseHookProc(int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if (nCode >= 0)
+            // 钩子回调必须整体兜底: 托管异常穿越原生边界会终止进程;
+            // 且无论发生什么都必须 CallNextHookEx, 否则这条输入会被吞掉。
+            try
             {
-                var info = (NativeMethods.MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.MSLLHOOKSTRUCT));
-                // 忽略程序自身注入的事件(LLMHF_INJECTED): 只录制用户真实操作
-                if ((info.flags & 0x01) != 0)
-                    return NativeMethods.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
-                if (!MouseKeyAllowed((uint)wParam, info.mouseData))
-                    return NativeMethods.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
-                int x = info.pt.x;
-                int y = info.pt.y;
-                switch ((int)wParam)
+                if (nCode >= 0)
                 {
-                    case NativeMethods.WM_MOUSEMOVE:
-                        // 连续移动合并为一条"移动到终点"
-                        if (!TryMergeMove(x, y)) Record(MacroEventKind.Move, x, y, 0);
-                        break;
-                    case NativeMethods.WM_LBUTTONDOWN:
-                        HandleMouseButton(true, 0, x, y, MacroEventKind.LeftDown);
-                        break;
-                    case NativeMethods.WM_LBUTTONUP:
-                        HandleMouseButton(false, 0, x, y, MacroEventKind.LeftDown);
-                        break;
-                    case NativeMethods.WM_RBUTTONDOWN:
-                        HandleMouseButton(true, 1, x, y, MacroEventKind.RightDown);
-                        break;
-                    case NativeMethods.WM_RBUTTONUP:
-                        HandleMouseButton(false, 1, x, y, MacroEventKind.RightDown);
-                        break;
-                    case NativeMethods.WM_MBUTTONDOWN:
-                        HandleMouseButton(true, 2, x, y, MacroEventKind.MiddleDown);
-                        break;
-                    case NativeMethods.WM_MBUTTONUP:
-                        HandleMouseButton(false, 2, x, y, MacroEventKind.MiddleDown);
-                        break;
-                    case NativeMethods.WM_MOUSEWHEEL:
-                        Record(MacroEventKind.Wheel, x, y, (short)((info.mouseData >> 16) & 0xFFFF));
-                        break;
+                    var info = (NativeMethods.MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.MSLLHOOKSTRUCT));
+                    // 忽略程序自身注入的事件(LLMHF_INJECTED): 只录制用户真实操作
+                    if ((info.flags & 0x01) != 0)
+                        return NativeMethods.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
+                    if (!MouseKeyAllowed((uint)wParam, info.mouseData))
+                        return NativeMethods.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
+                    int x = info.pt.x;
+                    int y = info.pt.y;
+                    switch ((int)wParam)
+                    {
+                        case NativeMethods.WM_MOUSEMOVE:
+                            // 连续移动合并为一条"移动到终点"
+                            if (!TryMergeMove(x, y)) Record(MacroEventKind.Move, x, y, 0);
+                            break;
+                        case NativeMethods.WM_LBUTTONDOWN:
+                            HandleMouseButton(true, 0, x, y, MacroEventKind.LeftDown);
+                            break;
+                        case NativeMethods.WM_LBUTTONUP:
+                            HandleMouseButton(false, 0, x, y, MacroEventKind.LeftDown);
+                            break;
+                        case NativeMethods.WM_RBUTTONDOWN:
+                            HandleMouseButton(true, 1, x, y, MacroEventKind.RightDown);
+                            break;
+                        case NativeMethods.WM_RBUTTONUP:
+                            HandleMouseButton(false, 1, x, y, MacroEventKind.RightDown);
+                            break;
+                        case NativeMethods.WM_MBUTTONDOWN:
+                            HandleMouseButton(true, 2, x, y, MacroEventKind.MiddleDown);
+                            break;
+                        case NativeMethods.WM_MBUTTONUP:
+                            HandleMouseButton(false, 2, x, y, MacroEventKind.MiddleDown);
+                            break;
+                        case NativeMethods.WM_MOUSEWHEEL:
+                            Record(MacroEventKind.Wheel, x, y, (short)((info.mouseData >> 16) & 0xFFFF));
+                            break;
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                try { Log.Warn("录制鼠标钩子异常: " + ex.Message); } catch (Exception) { }
             }
             return NativeMethods.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
         }
 
         private IntPtr KeyboardHookProc(int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if (nCode >= 0)
+            try
             {
-                var info = (NativeMethods.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.KBDLLHOOKSTRUCT));
-                int vk = (int)info.vkCode;
-                // 忽略注入按键(LLKHF_INJECTED)与热键按键
-                if ((info.flags & 0x10) == 0 && !IsHotkeyKey((uint)vk))
+                if (nCode >= 0)
                 {
-                    switch ((int)wParam)
+                    var info = (NativeMethods.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.KBDLLHOOKSTRUCT));
+                    int vk = (int)info.vkCode;
+                    // 忽略注入按键(LLKHF_INJECTED)与热键按键
+                    if ((info.flags & 0x10) == 0 && !IsHotkeyKey((uint)vk))
                     {
-                        case NativeMethods.WM_KEYDOWN:
-                        case NativeMethods.WM_SYSKEYDOWN:
-                            HandleKey(true, vk);
-                            break;
-                        case NativeMethods.WM_KEYUP:
-                        case NativeMethods.WM_SYSKEYUP:
-                            HandleKey(false, vk);
-                            break;
+                        switch ((int)wParam)
+                        {
+                            case NativeMethods.WM_KEYDOWN:
+                            case NativeMethods.WM_SYSKEYDOWN:
+                                HandleKey(true, vk);
+                                break;
+                            case NativeMethods.WM_KEYUP:
+                            case NativeMethods.WM_SYSKEYUP:
+                                HandleKey(false, vk);
+                                break;
+                        }
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                try { Log.Warn("录制键盘钩子异常: " + ex.Message); } catch (Exception) { }
             }
             return NativeMethods.CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
         }
