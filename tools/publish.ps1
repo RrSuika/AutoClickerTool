@@ -37,6 +37,14 @@ if (Test-Path "docs\screenshots") {
 Get-ChildItem -Path $root -Filter "*.txt" | Where-Object { $_.Name -ne "log.txt" } | ForEach-Object { Copy-Item $_.FullName $outDir }
 if (Test-Path "interception.dll") { Copy-Item "interception.dll" $outDir }
 
+# 测试音效: 放进包内 Sounds 文件夹, 用户解压后可直接在音效页绑定试听
+# (脚本必须保持 ASCII, 中文文件名用通配符匹配; 绝不打包用户自己的音效/场景/配置)
+$testWavs = Get-ChildItem -Path (Join-Path $root "assets") -Filter "*.wav" -ErrorAction SilentlyContinue
+if ($testWavs) {
+    New-Item -ItemType Directory -Path (Join-Path $outDir "Sounds") -Force | Out-Null
+    foreach ($w in $testWavs) { Copy-Item $w.FullName (Join-Path $outDir "Sounds") }
+}
+
 $zip = "$outDir.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path $outDir -DestinationPath $zip -Force
