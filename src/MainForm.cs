@@ -126,6 +126,8 @@ namespace AutoClickerTool
 
         // 按键音效页
         private CheckBox chkSfx;
+        private ClayComboBox cboSfxScene;
+        private Button btnSfxNewScene;
         private ClaySlider sldGlobalVolume;
         private Label lblGlobalVol;
         private ClaySlider sldKeyVolume;
@@ -137,6 +139,8 @@ namespace AutoClickerTool
         private Button btnSfxTest;
         private Button btnSfxFolder;
         private bool _sfxSliderSync; // 程序化更新音量滑块时抑制事件
+        private bool _sfxSceneSync;  // 程序化更新场景下拉时抑制事件
+        private readonly List<string> _sfxSceneNames = new List<string>(); // 场景下拉: 下标 → 场景名("" = 默认)
         private readonly List<SfxKey> _sfxKeys = new List<SfxKey>(); // 统一列表(单键 + 组合键)
 
         /// <summary>音效绑定条目(单键或组合键统一表示)。</summary>
@@ -262,6 +266,10 @@ namespace AutoClickerTool
                 _saveTimer.Stop();
                 if (_savePending) { _savePending = false; WriteSettingsNow(); }
             };
+
+            // 启动时不把键盘焦点交给任何控件: 否则聚焦按钮会画出虚线焦点环(系统初始状态"显示焦点提示",
+            // 直到鼠标活动才隐藏), 表现为"每次启动个别按钮周边有黑色虚线框"
+            Shown += delegate { ActiveControl = null; };
 
             // 首次启动(config.json 不存在): 弹出欢迎窗口选择默认语言 + 功能介绍
             if (!AppConfig.ConfigExists)
@@ -681,7 +689,7 @@ namespace AutoClickerTool
         {
             var gb = Grp("Key Settings", 10, 10, 540, 136);
             // 行1: 按键下拉(单键快捷选择); 点击标签/下拉区域 = 切换为「按键」占主导并清空已捕获的键
-            var lblKey = Lbl("Key:", 15, 30);
+            var lblKey = Lbl("Key:", 15, 34); // 与右侧输入壳对齐: 标签 y = 壳 y + 4(与其它页同规范)
             lblKey.Click += delegate { EnableDropdownMode(); };
             gb.Controls.Add(lblKey);
             cboKey = new ClayComboBox();
@@ -1056,27 +1064,35 @@ namespace AutoClickerTool
 
         private void BuildSfxPage(Panel page)
         {
-            var gb = Grp("Key Sound Effects", 10, 10, 540, 128);
+            var gb = Grp("Key Sound Effects", 10, 10, 540, 158);
             chkSfx = new ClayCheck { Name = "Enable key sound effects (new key overrides the playing sound)", Text = Lang.T("Enable key sound effects (new key overrides the playing sound)"), Location = new Point(Dpi.X(15), Dpi.X(28)), Checked = true };
+            // 场景: 每个场景 = Sounds 下的一个子文件夹 + 自己的一组绑定
+            gb.Controls.Add(Lbl("Scene:", 15, 58));
+            cboSfxScene = new ClayComboBox();
+            cboSfxScene.Location = new Point(Dpi.X(70), Dpi.X(54));
+            cboSfxScene.Size = new Size(Dpi.X(180), Dpi.X(26));
+            gb.Controls.Add(ClayKit.InputShell(cboSfxScene, 70, 54, 180));
+            btnSfxNewScene = new ClayButton { Name = "New scene", Text = Lang.T("New scene"), Location = new Point(Dpi.X(260), Dpi.X(52)), Size = new Size(Dpi.X(100), Dpi.X(26)) };
+            gb.Controls.Add(btnSfxNewScene);
             // 全局音效音量(总音量): 单键音量是相对音量, 实际响度 = 两者相乘; 拉到 0 = 全局静音
-            gb.Controls.Add(Lbl("Global SFX volume:", 15, 60));
-            sldGlobalVolume = new ClaySlider { Minimum = 0, Maximum = 100, Value = 100, Location = new Point(Dpi.X(140), Dpi.X(56)), Size = new Size(Dpi.X(150), Dpi.X(22)) };
+            gb.Controls.Add(Lbl("Global SFX volume:", 15, 90));
+            sldGlobalVolume = new ClaySlider { Minimum = 0, Maximum = 100, Value = 100, Location = new Point(Dpi.X(140), Dpi.X(86)), Size = new Size(Dpi.X(150), Dpi.X(22)) };
             _hintTip.SetToolTip(sldGlobalVolume, Lang.T("Global SFX volume tooltip"));
             gb.Controls.Add(sldGlobalVolume);
-            lblGlobalVol = new Label { Text = "100%", Location = new Point(Dpi.X(298), Dpi.X(60)), AutoSize = true, ForeColor = Clay.Ink, BackColor = Clay.CardBg };
+            lblGlobalVol = new Label { Text = "100%", Location = new Point(Dpi.X(298), Dpi.X(90)), AutoSize = true, ForeColor = Clay.Ink, BackColor = Clay.CardBg };
             gb.Controls.Add(lblGlobalVol);
-            btnSfxAdd = new ClayButton { Name = "Add binding", Text = Lang.T("Add binding"), Location = new Point(Dpi.X(15), Dpi.X(88)), Size = new Size(Dpi.X(100), Dpi.X(28)) };
-            btnSfxDelete = new ClayButton { Name = "Delete binding", Text = Lang.T("Delete binding"), Location = new Point(Dpi.X(125), Dpi.X(88)), Size = new Size(Dpi.X(105), Dpi.X(28)) };
-            btnSfxTest = new ClayButton { Name = "Play sound", Text = Lang.T("Play sound"), Location = new Point(Dpi.X(240), Dpi.X(88)), Size = new Size(Dpi.X(80), Dpi.X(28)) };
-            btnSfxFolder = new ClayButton { Name = "Open sounds folder", Text = Lang.T("Open sounds folder"), Location = new Point(Dpi.X(330), Dpi.X(88)), Size = new Size(Dpi.X(140), Dpi.X(28)) };
+            btnSfxAdd = new ClayButton { Name = "Add binding", Text = Lang.T("Add binding"), Location = new Point(Dpi.X(15), Dpi.X(118)), Size = new Size(Dpi.X(100), Dpi.X(28)) };
+            btnSfxDelete = new ClayButton { Name = "Delete binding", Text = Lang.T("Delete binding"), Location = new Point(Dpi.X(125), Dpi.X(118)), Size = new Size(Dpi.X(105), Dpi.X(28)) };
+            btnSfxTest = new ClayButton { Name = "Play sound", Text = Lang.T("Play sound"), Location = new Point(Dpi.X(240), Dpi.X(118)), Size = new Size(Dpi.X(80), Dpi.X(28)) };
+            btnSfxFolder = new ClayButton { Name = "Open sounds folder", Text = Lang.T("Open sounds folder"), Location = new Point(Dpi.X(330), Dpi.X(118)), Size = new Size(Dpi.X(140), Dpi.X(28)) };
             gb.Controls.AddRange(new Control[] { chkSfx, btnSfxAdd, btnSfxDelete, btnSfxTest, btnSfxFolder });
             page.Controls.Add(gb);
 
             // 绑定列表
             var lstShell = new ClayPanel
             {
-                Location = new Point(Dpi.X(10), Dpi.X(148)),
-                Size = new Size(Dpi.X(420), Dpi.X(150)),
+                Location = new Point(Dpi.X(10), Dpi.X(178)),
+                Size = new Size(Dpi.X(420), Dpi.X(120)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Inset = true,
                 BackColor = Theme.Current.InputBg
@@ -1084,7 +1100,7 @@ namespace AutoClickerTool
             lstSfx = new ListView
             {
                 Location = new Point(Dpi.X(4), Dpi.X(4)),
-                Size = new Size(Dpi.X(412), Dpi.X(142)),
+                Size = new Size(Dpi.X(412), Dpi.X(112)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
                 View = View.Details,
                 FullRowSelect = true,
@@ -1111,7 +1127,7 @@ namespace AutoClickerTool
             lblKeyVol = new Label { Text = "100%", Location = new Point(Dpi.X(308), Dpi.X(330)), AutoSize = true, ForeColor = Clay.Ink, BackColor = Clay.WindowBg };
             page.Controls.AddRange(new Control[] { lblKeyVolTitle, sldKeyVolume, lblKeyVol });
 
-            page.Controls.Add(Tip("Tip: assign a sound to any key; pressing the key plays the sound, and a newly pressed bound key overrides the currently playing one.\r\nPut sound files (wav/mp3) into the Sounds folder next to this program.", 12, 356));
+            page.Controls.Add(Tip("Tip: assign a sound to any key; pressing the key plays the sound, and a newly pressed bound key overrides the currently playing one.\r\nEach scene has its own subfolder under Sounds (create scenes with the \"New scene\" button) and its own set of bindings.", 12, 356));
         }
 
         private void WireEvents()
@@ -1216,8 +1232,9 @@ namespace AutoClickerTool
                 var sel = SelectedSfx();
                 if (sel == null) return;
                 sel.Volume = (int)sldKeyVolume.Value;
-                if (sel.IsCombo) _cfg.SfxComboVolumes[sel.Combo] = sel.Volume;
-                else _cfg.SfxBindingVolumes[sel.Vk.ToString()] = sel.Volume;
+                var scene = CurrentSfxSceneData();
+                if (sel.IsCombo) scene.ComboVolumes[sel.Combo] = sel.Volume;
+                else scene.Volumes[sel.Vk.ToString()] = sel.Volume;
                 lblKeyVol.Text = sel.Volume + "%";
                 ApplySfxToEngine();
                 SaveSettings();
@@ -1231,6 +1248,19 @@ namespace AutoClickerTool
             btnSfxDelete.Click += delegate { DeleteSfxBinding(); };
             btnSfxTest.Click += delegate { TestSfx(); };
             btnSfxFolder.Click += delegate { OpenSfxFolder(); };
+            cboSfxScene.SelectedIndexChanged += delegate
+            {
+                if (_applying || _sfxSceneSync) return;
+                int i = cboSfxScene.SelectedIndex;
+                if (i < 0 || i >= _sfxSceneNames.Count) return;
+                _cfg.SfxCurrentScene = _sfxSceneNames[i];
+                ApplySfxToEngine();
+                RefreshSfxList();
+                UpdateKeyVolumeSlider();
+                SaveSettings();
+                SetStatus(Lang.F("Sound scene switched to {0}", _cfg.SfxCurrentScene.Length == 0 ? Lang.T("Default scene") : _cfg.SfxCurrentScene));
+            };
+            btnSfxNewScene.Click += delegate { CreateSfxScene(); };
 
             // 语言 / 主题切换
             cboLanguage.SelectedIndexChanged += delegate
@@ -1337,6 +1367,7 @@ namespace AutoClickerTool
                 lstSfx.Columns[0].Text = Lang.T("Key:");
                 lstSfx.Columns[1].Text = Lang.T("Sound file");
             }
+            RefreshSfxScenesCombo();
             RefreshSfxList();
 
             // 下拉框 items 重建(保持选择)
@@ -2294,6 +2325,129 @@ namespace AutoClickerTool
         /// 音量语义: 「全局音效音量」是总音量, 单键音量是**相对**音量(默认 100%), 实际音量 = 两者相乘。
         /// 所以全局音量拉到 0 一定是全局静音, 即使某个键单独设过音量也不会例外。
         /// </summary>
+        /// <summary>当前场景的文件夹: 默认场景 = Sounds 根目录, 命名场景 = Sounds\<场景名>。</summary>
+        private string CurrentSfxFolder()
+        {
+            string scene = _cfg.SfxCurrentScene ?? "";
+            return scene.Length == 0 ? AppConfig.SoundsDir : Path.Combine(AppConfig.SoundsDir, scene);
+        }
+
+        /// <summary>当前场景的绑定数据(不存在则补建空数据)。</summary>
+        private SfxSceneData CurrentSfxSceneData()
+        {
+            string scene = _cfg.SfxCurrentScene ?? "";
+            SfxSceneData d;
+            if (_cfg.SfxScenes.TryGetValue(scene, out d)) return d;
+            d = new SfxSceneData();
+            _cfg.SfxScenes[scene] = d;
+            return d;
+        }
+
+        /// <summary>刷新场景下拉: 「默认」 + Sounds 下全部子文件夹; 选中项与 _cfg.SfxCurrentScene 对齐。</summary>
+        private void RefreshSfxScenesCombo()
+        {
+            _sfxSceneSync = true;
+            try
+            {
+                _sfxSceneNames.Clear();
+                cboSfxScene.Items.Clear();
+                cboSfxScene.Items.Add(Lang.T("Default scene"));
+                _sfxSceneNames.Add("");
+                try
+                {
+                    if (Directory.Exists(AppConfig.SoundsDir))
+                    {
+                        foreach (var d in Directory.GetDirectories(AppConfig.SoundsDir))
+                        {
+                            string name = Path.GetFileName(d);
+                            cboSfxScene.Items.Add(name);
+                            _sfxSceneNames.Add(name);
+                        }
+                    }
+                }
+                catch (Exception) { }
+                // 配置里有但文件夹缺失的场景也列出(数据还在)
+                foreach (var kv in _cfg.SfxScenes)
+                {
+                    if (kv.Key.Length == 0 || _sfxSceneNames.Contains(kv.Key)) continue;
+                    cboSfxScene.Items.Add(kv.Key);
+                    _sfxSceneNames.Add(kv.Key);
+                }
+                int idx = _sfxSceneNames.IndexOf(_cfg.SfxCurrentScene ?? "");
+                cboSfxScene.SelectedIndex = idx >= 0 ? idx : 0;
+            }
+            finally
+            {
+                _sfxSceneSync = false;
+            }
+        }
+
+        /// <summary>新建音效场景: 弹窗输入名字 → 建 Sounds\<名字> 文件夹 + 空绑定数据并切换过去。</summary>
+        private void CreateSfxScene()
+        {
+            string name = PromptSceneName();
+            if (name == null) return; // 取消
+            name = name.Trim();
+            if (name.Length == 0)
+            {
+                SetStatus(Lang.T("Scene name cannot be empty"));
+                return;
+            }
+            if (name.IndexOfAny(System.IO.Path.GetInvalidFileNameChars()) >= 0)
+            {
+                SetStatus(Lang.T("Scene name contains invalid characters"));
+                return;
+            }
+            if (_sfxSceneNames.Contains(name))
+            {
+                SetStatus(Lang.T("Scene already exists"));
+                return;
+            }
+            try
+            {
+                AppConfig.EnsureDataDirs();
+                string dir = Path.Combine(AppConfig.SoundsDir, name);
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                if (!_cfg.SfxScenes.ContainsKey(name)) _cfg.SfxScenes[name] = new SfxSceneData();
+                _cfg.SfxCurrentScene = name;
+                RefreshSfxScenesCombo();
+                ApplySfxToEngine();
+                RefreshSfxList();
+                UpdateKeyVolumeSlider();
+                SaveSettings();
+                SetStatus(Lang.F("Sound scene created: {0}", name));
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, Lang.F("Save failed: {0}", ex.Message), Lang.T("Error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        /// <summary>弹窗输入场景名; 返回 null = 取消。</summary>
+        private string PromptSceneName()
+        {
+            using (var f = new Form())
+            {
+                f.Text = Lang.T("New scene");
+                f.ClientSize = new Size(Dpi.X(320), Dpi.X(120));
+                f.StartPosition = FormStartPosition.CenterParent;
+                f.FormBorderStyle = FormBorderStyle.FixedDialog;
+                f.MaximizeBox = false;
+                f.MinimizeBox = false;
+                f.ShowInTaskbar = false;
+                Clay.ApplyFrameTheme(f.Handle);
+                f.BackColor = Clay.WindowBg;
+                var lbl = new Label { Text = Lang.T("Scene name:"), Location = new Point(Dpi.X(16), Dpi.X(20)), AutoSize = true, ForeColor = Clay.Ink, BackColor = Clay.WindowBg };
+                var txt = new TextBox { Location = new Point(Dpi.X(16), Dpi.X(44)), Size = new Size(Dpi.X(288), Dpi.X(24)), BorderStyle = BorderStyle.FixedSingle, ForeColor = Clay.Ink, BackColor = Theme.Current.InputBg };
+                var btnOk = new ClayButton { Text = Lang.T("OK"), DialogResult = DialogResult.OK, Location = new Point(Dpi.X(140), Dpi.X(80)), Size = new Size(Dpi.X(80), Dpi.X(28)) };
+                var btnCancel = new ClayButton { Text = Lang.T("Cancel"), DialogResult = DialogResult.Cancel, Location = new Point(Dpi.X(228), Dpi.X(80)), Size = new Size(Dpi.X(80), Dpi.X(28)) };
+                f.Controls.AddRange(new Control[] { lbl, txt, btnOk, btnCancel });
+                f.AcceptButton = btnOk;
+                f.CancelButton = btnCancel;
+                return f.ShowDialog(this) == DialogResult.OK ? txt.Text : null;
+            }
+        }
+
         private void ApplySfxToEngine()
         {
             _sfx.Enabled = chkSfx.Checked;
@@ -2301,24 +2455,26 @@ namespace AutoClickerTool
             _sfx.Volumes.Clear();
             _sfx.Combos.Clear();
 
+            var scene = CurrentSfxSceneData();
+            string folder = CurrentSfxFolder();
             int master = Clamp(_cfg.SfxVolume, 0, 100);
-            foreach (var kv in _cfg.SfxBindings)
+            foreach (var kv in scene.Bindings)
             {
                 int vk;
                 if (!int.TryParse(kv.Key, out vk)) continue;
-                _sfx.Bindings[vk] = Path.Combine(AppConfig.SoundsDir, kv.Value);
-                int rel = _cfg.SfxBindingVolumes.ContainsKey(kv.Key) ? _cfg.SfxBindingVolumes[kv.Key] : 100;
+                _sfx.Bindings[vk] = Path.Combine(folder, kv.Value);
+                int rel = scene.Volumes.ContainsKey(kv.Key) ? scene.Volumes[kv.Key] : 100;
                 _sfx.Volumes[vk] = EffectiveSfxVolume(rel, master) * 10; // 0~100 → MCI 0~1000
             }
-            foreach (var kv in _cfg.SfxComboBindings)
+            foreach (var kv in scene.ComboBindings)
             {
                 var hk = Hotkey.Parse(kv.Key);
                 if (hk == null) continue;
-                int rel = _cfg.SfxComboVolumes.ContainsKey(kv.Key) ? _cfg.SfxComboVolumes[kv.Key] : 100;
+                int rel = scene.ComboVolumes.ContainsKey(kv.Key) ? scene.ComboVolumes[kv.Key] : 100;
                 _sfx.Combos.Add(new SfxCombo
                 {
                     Combo = hk,
-                    Path = Path.Combine(AppConfig.SoundsDir, kv.Value),
+                    Path = Path.Combine(folder, kv.Value),
                     Volume = EffectiveSfxVolume(rel, master) * 10
                 });
             }
@@ -2370,23 +2526,24 @@ namespace AutoClickerTool
         {
             lstSfx.Items.Clear();
             _sfxKeys.Clear();
-            foreach (var kv in _cfg.SfxBindings)
+            var scene = CurrentSfxSceneData();
+            foreach (var kv in scene.Bindings)
             {
                 string file = kv.Value;
                 int vk;
                 if (!int.TryParse(kv.Key, out vk)) continue;
                 // 单键音量是"相对音量"(默认 100%), 实际响度 = 相对音量 × 全局音效音量
-                int vol = _cfg.SfxBindingVolumes.ContainsKey(kv.Key) ? _cfg.SfxBindingVolumes[kv.Key] : 100;
+                int vol = scene.Volumes.ContainsKey(kv.Key) ? scene.Volumes[kv.Key] : 100;
                 var sk = new SfxKey { IsCombo = false, Vk = vk, Display = Hotkey.GetName((uint)vk), File = file, Volume = Clamp(vol, 0, 100) };
                 _sfxKeys.Add(sk);
                 var lvi = new ListViewItem(new[] { sk.Display, file });
                 lvi.ForeColor = Clay.Ink;
                 lstSfx.Items.Add(lvi);
             }
-            foreach (var kv in _cfg.SfxComboBindings)
+            foreach (var kv in scene.ComboBindings)
             {
                 string file = kv.Value;
-                int vol = _cfg.SfxComboVolumes.ContainsKey(kv.Key) ? _cfg.SfxComboVolumes[kv.Key] : 100;
+                int vol = scene.ComboVolumes.ContainsKey(kv.Key) ? scene.ComboVolumes[kv.Key] : 100;
                 var sk = new SfxKey { IsCombo = true, Combo = kv.Key, Display = kv.Key, File = file, Volume = Clamp(vol, 0, 100) };
                 _sfxKeys.Add(sk);
                 var lvi = new ListViewItem(new[] { sk.Display, file });
@@ -2421,20 +2578,21 @@ namespace AutoClickerTool
                 using (var dlg = new OpenFileDialog
                 {
                     Title = Lang.T("Select sound file"),
-                    InitialDirectory = AppConfig.SoundsDir,
+                    InitialDirectory = CurrentSfxFolder(),
                     Filter = "音效文件 (*.wav;*.mp3)|*.wav;*.mp3|All files (*.*)|*.*"
                 })
                 {
                     if (dlg.ShowDialog(this) != DialogResult.OK) return;
                     string fileName = Path.GetFileName(dlg.FileName);
-                    string dest = Path.Combine(AppConfig.SoundsDir, fileName);
+                    string dest = Path.Combine(CurrentSfxFolder(), fileName);
                     try
                     {
-                        // 不在 Sounds 文件夹内的文件复制进来, 统一音效存储
+                        // 不在当前场景文件夹内的文件复制进来, 统一音效存储
                         if (!string.Equals(dlg.FileName, dest, StringComparison.OrdinalIgnoreCase) && !File.Exists(dest))
                             File.Copy(dlg.FileName, dest);
-                        if (isCombo) _cfg.SfxComboBindings[combo] = fileName; // 同组合旧绑定被覆盖
-                        else _cfg.SfxBindings[vk.ToString()] = fileName;      // 同键旧绑定被覆盖
+                        var scene = CurrentSfxSceneData();
+                        if (isCombo) scene.ComboBindings[combo] = fileName; // 同组合旧绑定被覆盖
+                        else scene.Bindings[vk.ToString()] = fileName;      // 同键旧绑定被覆盖
                         ApplySfxToEngine();
                         SaveSettings();
                         RefreshSfxList();
@@ -2456,15 +2614,16 @@ namespace AutoClickerTool
                 SetStatus(Lang.T("Select a sound binding first"));
                 return;
             }
+            var scene = CurrentSfxSceneData();
             if (sel.IsCombo)
             {
-                _cfg.SfxComboBindings.Remove(sel.Combo);
-                if (_cfg.SfxComboVolumes.ContainsKey(sel.Combo)) _cfg.SfxComboVolumes.Remove(sel.Combo);
+                scene.ComboBindings.Remove(sel.Combo);
+                if (scene.ComboVolumes.ContainsKey(sel.Combo)) scene.ComboVolumes.Remove(sel.Combo);
             }
             else
             {
-                _cfg.SfxBindings.Remove(sel.Vk.ToString());
-                if (_cfg.SfxBindingVolumes.ContainsKey(sel.Vk.ToString())) _cfg.SfxBindingVolumes.Remove(sel.Vk.ToString());
+                scene.Bindings.Remove(sel.Vk.ToString());
+                if (scene.Volumes.ContainsKey(sel.Vk.ToString())) scene.Volumes.Remove(sel.Vk.ToString());
             }
             ApplySfxToEngine();
             SaveSettings();
@@ -2482,7 +2641,7 @@ namespace AutoClickerTool
             }
             // 与按键播放走同一条常驻线程(不必先试听一次才能出声); 音量同样受全局音量影响
             int vol = EffectiveSfxVolume(sel.Volume, Clamp(_cfg.SfxVolume, 0, 100));
-            _sfx.TestPlay(Path.Combine(AppConfig.SoundsDir, sel.File), vol * 10);
+            _sfx.TestPlay(Path.Combine(CurrentSfxFolder(), sel.File), vol * 10);
         }
 
         private void OpenSfxFolder()
@@ -2490,7 +2649,9 @@ namespace AutoClickerTool
             try
             {
                 AppConfig.EnsureDataDirs();
-                Process.Start("explorer.exe", "\"" + AppConfig.SoundsDir + "\"");
+                string dir = CurrentSfxFolder();
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                Process.Start("explorer.exe", "\"" + dir + "\"");
             }
             catch (Exception ex)
             {
@@ -2917,6 +3078,7 @@ namespace AutoClickerTool
                 chkSfx.Checked = cfg.SfxEnabled;
                 sldGlobalVolume.Value = Clamp(cfg.SfxVolume, 0, 100);
                 lblGlobalVol.Text = (int)sldGlobalVolume.Value + "%"; // 与滑块实际值一致(滑块内部有 Clamp)
+                RefreshSfxScenesCombo();
                 ApplySfxToEngine();
                 RefreshSfxList();
                 UpdateKeyVolumeSlider();

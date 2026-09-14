@@ -6,6 +6,15 @@ using System.Web.Script.Serialization;
 
 namespace AutoClickerTool
 {
+    /// <summary>一个音效场景的绑定数据(键码/组合 → 文件名, 文件位于该场景文件夹 Sounds\<场景名>)。</summary>
+    internal class SfxSceneData
+    {
+        public Dictionary<string, string> Bindings = new Dictionary<string, string>(); // 键码(字符串) → 文件名
+        public Dictionary<string, int> Volumes = new Dictionary<string, int>();         // 键码(字符串) → 单键相对音量 0~100
+        public Dictionary<string, string> ComboBindings = new Dictionary<string, string>(); // 组合键字符串(如 Ctrl+C) → 文件名
+        public Dictionary<string, int> ComboVolumes = new Dictionary<string, int>();    // 组合键字符串 → 相对音量 0~100
+    }
+
     /// <summary>
     /// 应用程序设置。保存到 exe 同目录下的 config.json，启动时自动加载。
     /// 热键以字符串形式存储(如 "Ctrl+Shift+K"、"F6"、"Alt+Q"、"鼠标X1")。
@@ -16,7 +25,7 @@ namespace AutoClickerTool
         public int ConfigVersion = 0;
 
         /// <summary>当前配置结构版本。新增字段并需要迁移时 +1, 并在 Migrate() 里按版本补齐。</summary>
-        private const int CurrentVersion = 4;
+        private const int CurrentVersion = 5;
 
         // 运行限制模式: 三个功能(连点/连按/回放)统一使用同一套语义。
         public const int LimitCount = 0;      // 指定次数
@@ -91,10 +100,16 @@ namespace AutoClickerTool
         // 注意: JavaScriptSerializer 反序列化要求字典键为字符串, 因此单键绑定用字符串键存键码(JSON 中本就是字符串键, 向后兼容)。
         public bool SfxEnabled = true;   // 按键音效默认开启(新安装即生效; 用户可关闭)
         public int SfxVolume = 100;     // 全局音量 0~100(%)
-        public Dictionary<string, string> SfxBindings = new Dictionary<string, string>(); // 键码(字符串) → Sounds 文件夹内文件名
-        public Dictionary<string, int> SfxBindingVolumes = new Dictionary<string, int>(); // 键码(字符串) → 单键音量 0~100(缺省用全局)
-        public Dictionary<string, string> SfxComboBindings = new Dictionary<string, string>(); // 组合键字符串(如 Ctrl+C) → 文件名
-        public Dictionary<string, int> SfxComboVolumes = new Dictionary<string, int>(); // 组合键字符串 → 音量 0~100(缺省用全局)
+
+        // v5 场景化: 每个场景 = Sounds 下的一个子文件夹 + 自己的一组绑定。
+        // 键 "" = 默认场景(文件直接放 Sounds 根目录)。旧字段 SfxBindings 等仅作 v4→v5 迁移用。
+        public Dictionary<string, SfxSceneData> SfxScenes = new Dictionary<string, SfxSceneData>();
+        public string SfxCurrentScene = "";
+
+        public Dictionary<string, string> SfxBindings = new Dictionary<string, string>(); // (旧字段, 仅用于迁移) 键码(字符串) → Sounds 文件夹内文件名
+        public Dictionary<string, int> SfxBindingVolumes = new Dictionary<string, int>(); // (旧字段, 仅用于迁移) 键码(字符串) → 单键音量 0~100
+        public Dictionary<string, string> SfxComboBindings = new Dictionary<string, string>(); // (旧字段, 仅用于迁移) 组合键字符串(如 Ctrl+C) → 文件名
+        public Dictionary<string, int> SfxComboVolumes = new Dictionary<string, int>(); // (旧字段, 仅用于迁移) 组合键字符串 → 音量 0~100
 
         // ---- 界面 ----
         public bool Topmost = false;
@@ -231,6 +246,20 @@ namespace AutoClickerTool
                 cfg.SpamUntilPrimary = !string.IsNullOrEmpty(cfg.SpamUntilTime);
                 cfg.PlayUntilPrimary = !string.IsNullOrEmpty(cfg.PlayUntilTime);
             }
+            if (cfg.ConfigVersion < 5)
+            {
+                // v4 → v5: 音效场景化。旧的全部绑定归入默认场景("", 文件在 Sounds 根目录),
+                // 之后用户可新建命名场景(子文件夹), 每个场景有自己的一组绑定。
+                Log.Warn(string.Format("配置从版本 {0} 迁移到 {1}", cfg.ConfigVersion, 5));
+                cfg.SfxScenes[""] = new SfxSceneData
+                {
+                    Bindings = cfg.SfxBindings,
+                    Volumes = cfg.SfxBindingVolumes,
+                    ComboBindings = cfg.SfxComboBindings,
+                    ComboVolumes = cfg.SfxComboVolumes
+                };
+                cfg.SfxCurrentScene = "";
+            }
             cfg.ConfigVersion = CurrentVersion;
         }
 
@@ -300,6 +329,16 @@ namespace AutoClickerTool
             }
             SanitizeSfxDict(cfg.SfxBindings);
             SanitizeSfxDict(cfg.SfxComboBindings);
+            // 场景化绑定同样只允许纯文件名(每个场景各自校验)
+            if (cfg.SfxScenes != null)
+            {
+                foreach (var scene in cfg.SfxScenes.Values)
+                {
+                    if (scene == null) continue;
+                    SanitizeSfxDict(scene.Bindings);
+                    SanitizeSfxDict(scene.ComboBindings);
+                }
+            }
         }
 
         /// <summary>音效绑定值必须是纯文件名(不含目录分隔符), 防止 config 路径穿越播放磁盘任意媒体文件。</summary>

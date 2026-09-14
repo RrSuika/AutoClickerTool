@@ -90,7 +90,7 @@ Common key names: F1~F24, A~Z, 0~9, Esc, Space, Enter, Tab, Backspace, CapsLock,
 
 ## 🎵 Key Sound Effects
 
-On the "Sound FX" page you can bind any single key or combo to a wav/mp3 sound file (automatically copied into the `Sounds` folder). Plays on press; a newly pressed key cuts off the currently playing sound. Supports a master switch, **global SFX volume** (the master volume) and per-key relative volume; actual loudness = per-key × global (global 0 = fully muted). The audio device is pre-warmed at startup — no need to hit "Test" once first.
+On the "Sound FX" page you can bind any single key or combo to a wav/mp3 sound file. Plays on press; a newly pressed key cuts off the currently playing sound. **Scenes**: each scene is a subfolder of `Sounds` (e.g. `Sounds\painting\`) with its own set of bindings — switch scenes with the dropdown, create one with "New scene"; added files are copied into the current scene's folder automatically. Supports a master switch, **global SFX volume** (the master volume) and per-key relative volume; actual loudness = per-key × global (global 0 = fully muted). The audio device is pre-warmed at startup — no need to hit "Test" once first.
 
 ## 📁 Project Structure
 

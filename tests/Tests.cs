@@ -98,7 +98,7 @@ internal static class Tests
         Check(fresh.SfxEnabled == true, "SfxEnabled 默认开启");
         Check(fresh.AutoStart == false, "AutoStart 默认关闭");
         Check(fresh.StartMinimized == false, "StartMinimized 默认关闭");
-        Check(fresh.ConfigVersion == 0, "ConfigVersion 原始默认=0(经 Load 后迁移为 4)");
+        Check(fresh.ConfigVersion == 0, "ConfigVersion 原始默认=0(经 Load 后迁移为 5)");
 
         Console.WriteLine("== AppConfig 不可信数据清洗(安全) ==");
         {
@@ -123,7 +123,7 @@ internal static class Tests
                     "LaunchPrograms 白名单: bat/相对路径被丢弃, exe/lnk 保留");
                 Check(!loaded.SfxBindings.ContainsKey("65") && loaded.SfxBindings["66"] == "ok.wav",
                     "音效绑定路径穿越被丢弃, 纯文件名保留");
-                Check(loaded.ConfigVersion == 4, "经 Load 后 ConfigVersion 迁移为 4");
+                Check(loaded.ConfigVersion == 5, "经 Load 后 ConfigVersion 迁移为 5");
             }
             finally
             {
@@ -191,6 +191,19 @@ internal static class Tests
                 var c6 = loadMigrated(new AppConfig { ConfigVersion = 3, ClickUntilTime = "08:00" });
                 Check(c6.ClickLimitMode == AppConfig.LimitDuration && c6.ClickUntilPrimary
                     && !string.IsNullOrEmpty(c6.ClickUntilAt), "旧 到点 08:00(无分钟) → 时长模式 + 截止时刻为准");
+
+                // 音效场景迁移(v4 → v5): 旧扁平绑定归入默认场景("")
+                var oldSfx = new AppConfig { ConfigVersion = 4 };
+                oldSfx.SfxBindings["83"] = "iphone.wav";
+                oldSfx.SfxBindingVolumes["83"] = 100;
+                oldSfx.SfxComboBindings["Ctrl+C"] = "c.wav";
+                var c7 = loadMigrated(oldSfx);
+                Check(c7.SfxCurrentScene == "" && c7.SfxScenes.ContainsKey("")
+                    && c7.SfxScenes[""].Bindings.ContainsKey("83")
+                    && c7.SfxScenes[""].Bindings["83"] == "iphone.wav"
+                    && c7.SfxScenes[""].Volumes.ContainsKey("83")
+                    && c7.SfxScenes[""].ComboBindings.ContainsKey("Ctrl+C"),
+                    "旧音效绑定 → 默认场景(场景化迁移)");
             }
             finally
             {

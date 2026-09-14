@@ -206,7 +206,6 @@ namespace AutoClickerTool
         // 动效进度 0~1
         private float _hoverT;
         private float _pressT;
-        private float _focusT;
         private float _selT = 1f;
 
         // 文字放不下时自动缩小的字号缓存(键=文本+宽度+字号+样式, 命中则复用, 未缩小为 null)
@@ -215,7 +214,6 @@ namespace AutoClickerTool
 
         private readonly Action<float> _animHover;
         private readonly Action<float> _animPress;
-        private readonly Action<float> _animFocus;
         private readonly Action<float> _animSel;
 
         public ClayButton()
@@ -228,7 +226,6 @@ namespace AutoClickerTool
             BackColor = Clay.CardBg;
             _animHover = v => { _hoverT = v; Invalidate(); };
             _animPress = v => { _pressT = v; Invalidate(); };
-            _animFocus = v => { _focusT = v; Invalidate(); };
             _animSel = v => { _selT = v; Invalidate(); };
             if (Selected) _selT = 1f;
         }
@@ -266,8 +263,6 @@ namespace AutoClickerTool
             Anim.To(_animPress, _pressT, 0f, 100f); // 松开略缓, 自然回弹
             base.OnMouseUp(e);
         }
-        protected override void OnGotFocus(EventArgs e) { Anim.To(_animFocus, _focusT, 1f, 100f); base.OnGotFocus(e); }
-        protected override void OnLostFocus(EventArgs e) { Anim.To(_animFocus, _focusT, 0f, 100f); base.OnLostFocus(e); }
         protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
 
         private bool Highlighted { get { return Selected || Accent || Danger || Mint; } }
@@ -397,18 +392,9 @@ namespace AutoClickerTool
             Font tf = FitFont(textRect.Width);
             TextRenderer.DrawText(g, Text, tf != null ? tf : Font, textRect, Enabled ? ForeColor : Clay.InkSoft,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-
-            // 焦点虚线环(淡入淡出)
-            if (Focused && ShowFocusCues)
-            {
-                int fa = (int)(200 * Anim.EaseOutCubic(_focusT));
-                if (fa > 4)
-                {
-                    using (var p = Clay.Round(Rectangle.Inflate(body, -4, -4), Math.Max(1, r - 4)))
-                    using (var pen = new Pen(Color.FromArgb(fa, Clay.Line)) { DashStyle = DashStyle.Dash })
-                        g.DrawPath(pen, p);
-                }
-            }
+            // 注意: 不再绘制键盘焦点虚线环。启动后窗口尚未收到鼠标活动时, 系统焦点提示状态
+            // 是"显示", 拿到初始键盘焦点的按钮会画出黑色虚线框(用户报告"每次启动个别按钮
+            // 周边有虚线框, 鼠标移上去才消失"); 工具类软件不需要键盘焦点环, 已移除。
         }
     }
 

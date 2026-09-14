@@ -342,6 +342,15 @@ namespace AutoClickerTool
                 = "请按下要绑定音效的单个按键...\r\n仅支持单个普通键盘键(不支持 Ctrl/Alt 等修饰键)\r\n松开按键完成设置, Esc 取消";
             d["Only a single non-modifier key is supported for sound binding"] = "音效绑定仅支持单个非修饰键";
             d["Mouse buttons cannot be spammed; bind them as hotkeys instead"] = "鼠标键不能用于连按, 请把它们绑定为热键使用";
+            d["Scene:"] = "场景:";
+            d["New scene"] = "新建场景";
+            d["Default scene"] = "默认";
+            d["Scene name:"] = "场景名称:";
+            d["Scene name cannot be empty"] = "场景名称不能为空";
+            d["Scene name contains invalid characters"] = "场景名称含有非法字符";
+            d["Scene already exists"] = "场景已存在";
+            d["Sound scene created: {0}"] = "音效场景已创建: {0}";
+            d["Sound scene switched to {0}"] = "音效场景已切换到: {0}";
             d["Sound bound: {0} → {1}"] = "已绑定音效: {0} → {1}";
             d["Press a key or combo to bind a sound...\r\nSingle key, or Ctrl/Alt/Shift/Win combos (e.g. Ctrl+C)\r\nRelease all keys to finish, Esc to cancel"]
                 = "请按下要绑定音效的按键或组合键...\r\n支持单个按键, 或 Ctrl/Alt/Shift/Win 组合键(如 Ctrl+C)\r\n松开全部按键完成设置, Esc 取消";

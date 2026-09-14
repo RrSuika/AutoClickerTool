@@ -93,8 +93,9 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 - 高级设置页的总开关控制子项 Enabled 状态（`UpdateHumanizeChildState`）
 
 ### 4.5 按键音效
-- 绑定表存 config：单键 `SfxBindings: Dictionary<string,string>`(键码字符串→文件名) + `SfxBindingVolumes: Dictionary<string,int>`(键码字符串→音量 0~100)——**键必须用字符串**，见坑 13；组合键 `SfxComboBindings: Dictionary<string,string>`(组合串如 "Ctrl+C"→文件名) + `SfxComboVolumes`(组合串→音量)。`SfxManager` 全局键盘钩子监听（**只监听不拦截**，与热键/录制并行），维护 `_down` 归一化按下集合：单键命中 `Bindings` 即播，组合键 `Satisfied()`(所有修饰键+键都按住)即播。**钩子回调只入队**（`Enqueue` 只保留最新一条保持覆盖式语义），后台线程执行 `SfxPlayer.Play(path, volume)`（MCI：新播放前 stop+close 旧的 = 覆盖式，`setaudio <alias> volume to N`，waveaudio 支持、mpegvideo 不支持静默忽略）。过滤注入按键（宏回放不触发音效）；回放期间 `Suppress` 抑制
-- 音效页：总开关 + **全局音效音量滑块**（`sldGlobalVolume` 0~100 → `SfxVolume`，总音量）+ **选中项音量滑块**（`sldKeyVolume`，该键的**相对**音量，缺省 100%）+ 添加绑定（复用 HotkeyCaptureForm 捕获**单键或组合键**）+ 删除/试听/打开 Sounds 文件夹。统一列表用内部 `SfxKey` 条目(单键/组合键)填充；滑块是自绘 `ClaySlider`（不用系统原生 TrackBar）。**实际响度 = 单键相对音量 × 全局音效音量 ÷ 100**（`EffectiveSfxVolume`），全局 0 即全局静音。`SfxEnabled` 默认**开启**（新安装即生效；老配置保留已存值）
+- **v5 场景化**：`SfxScenes: Dictionary<string, SfxSceneData>`(场景名→绑定数据, 键 "" = 默认场景) + `SfxCurrentScene`。场景 = `Sounds\<场景名>` 子文件夹 + 独立绑定表；文件路径 = `CurrentSfxFolder() + 文件名`。旧扁平字段 `SfxBindings/SfxBindingVolumes/SfxComboBindings/SfxComboVolumes` 仅作 v4→v5 迁移（`Migrate` 归入默认场景）。`SanitizeUntrusted` 对每个场景的绑定字典都要做纯文件名校验
+- 单键/组合绑定存场景数据内：键必须用字符串（见坑 13）。`SfxManager` 全局键盘钩子监听（**只监听不拦截**，与热键/录制并行），维护 `_down` 归一化按下集合：单键命中 `Bindings` 即播，组合键 `Satisfied()`(所有修饰键+键都按住)即播。**钩子回调只入队**（`Enqueue` 只保留最新一条保持覆盖式语义），后台线程执行 `SfxPlayer.Play(path, volume)`（MCI：新播放前 stop+close 旧的 = 覆盖式，`setaudio <alias> volume to N`，waveaudio 支持、mpegvideo 不支持静默忽略）。过滤注入按键（宏回放不触发音效）；回放期间 `Suppress` 抑制
+- 音效页：**场景下拉（`cboSfxScene`，枚举 Sounds 子文件夹 + 配置里的场景键；`RefreshSfxScenesCombo`）** + **新建场景**（`CreateSfxScene`：弹窗输入名字 → 建子文件夹 + 空绑定数据 + 切过去；名字校验空/非法字符/重复）+ 总开关 + **全局音效音量滑块**（`sldGlobalVolume` 0~100 → `SfxVolume`，总音量）+ **选中项音量滑块**（`sldKeyVolume`，该键的**相对**音量，缺省 100%）+ 添加绑定（复用 HotkeyCaptureForm 捕获**单键或组合键**，文件复制进**当前场景**文件夹）+ 删除/试听/打开**当前场景**文件夹。统一列表用内部 `SfxKey` 条目(单键/组合键)填充；滑块是自绘 `ClaySlider`（不用系统原生 TrackBar）。**实际响度 = 单键相对音量 × 全局音效音量 ÷ 100**（`EffectiveSfxVolume`），全局 0 即全局静音。`SfxEnabled` 默认**开启**（新安装即生效；老配置保留已存值）
 
 ### 4.6 主题系统
 - `Theme.Current` 提供全部颜色 + 风格开关（Dark=深色、Glow=霓虹光晕、Bevel=拟物斜面、Radius=圆角）
