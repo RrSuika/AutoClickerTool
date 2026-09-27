@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A Windows automation tool for game farming / auto-clicking scenarios. Features a mouse auto-clicker, key spammer, macro record & replay, global hotkeys and key sound effects; a built-in humanization engine and three input injection methods (including driver-level), designed specifically for scenarios where scripts get detected by games.
+A Windows automation tool for game farming / auto-clicking scenarios. Features a mouse auto-clicker, key spammer, macro record & replay, **screen recording (MP4 export)**, global hotkeys and key sound effects; a built-in humanization engine and three input injection methods (including driver-level), designed specifically for scenarios where scripts get detected by games.
 
 ## 📸 Screenshot
 
@@ -17,8 +17,9 @@ A Windows automation tool for game farming / auto-clicking scenarios. Features a
 - 🖱️ **Mouse Clicking** — auto-click at fixed intervals; follow the cursor or lock to coordinates
 - ⌨️ **Keyboard Spam** — timed tap / hold modes; the "Capture Key" button can capture a single key or **multiple keys pressed together** (e.g. `Shift+A`)
 - ⏺️ **Record & Play** — records real mouse/keyboard actions via global low-level hooks, auto-merges redundant actions (consecutive moves merged into one "move to end point", short presses merged into clicks/key taps); editable, saveable, replayable in loops at variable speed
+- 🎬 **Screen recording** — record a chosen monitor or a chosen window to **MP4 (H.264)**: pick resolution (native/720p/1080p/1440p) and frame rate (15/24/30/60), choose the output folder; a 3-second countdown precedes capture, and while recording a **draggable floating bar** (top-right) shows the elapsed time with pause/resume and stop-and-save buttons — the bar is never captured into the video. Optional: hide this window while recording, include the mouse cursor. **Zero dependencies**: GDI for capture, the built-in Media Foundation encoder for H.264 (hardware encoder preferred) — no bundled ffmpeg
 - ⏱️ **Run limits** — one run-limit control at the same position on all three pages (clicker / spammer / playback): **repeat N times / infinite loop / run duration (h·min·s) or until a specified time**; duration and deadline stay bidirectionally synced (setting 10 minutes shows local time + 10 min)
-- 🔥 **Global hotkeys** — all 5 function toggles fully customizable, any key combination: multi-key combos (e.g. `Ctrl+Q+W`), mouse side buttons, media keys
+- 🔥 **Global hotkeys** — all 8 function toggles fully customizable, any key combination: multi-key combos (e.g. `Ctrl+Q+W`), mouse side buttons, media keys
 - 🔊 **Key sound effects** — bind any single key / combo to a wav/mp3 sound; plays on press; a new key cuts off the currently playing sound (cut-off playback)
 - 🎭 **Humanization engine** — Gaussian-distributed intervals, landing-point jitter & drift, randomized press duration, bezier movement trajectories to reduce the "scripted" feel
 - 🛡️ **Three injection methods** — SendInput / SendMessage / Interception (driver-level), for different detection schemes
@@ -48,7 +49,10 @@ See [使用说明.txt](使用说明.txt) (user manual, Chinese) for detailed ins
 | Recording toggle | F7 |
 | Playback toggle | F8 |
 | Keyboard toggle | F9 |
-| Stop all | F12 |
+| Stop all (also stops and saves the recording) | F12 |
+| Video recording toggle (press once to start, again to stop and save) | F10 |
+| Pause / resume recording | F11 |
+| Stop and save the recording (recording only) | Ctrl+F12 |
 
 All hotkeys can be changed to any key combination on the "Hotkeys" page; changes are saved immediately and take effect on the next launch.
 
@@ -96,7 +100,9 @@ On the "Sound FX" page you can bind any single key or combo to a wav/mp3 sound f
 
 | Path | Description |
 |---|---|
-| [src/MainForm.cs](src/MainForm.cs) | Main UI: 7 tab pages, config load/save, DPI sync, DWM border theming |
+| [src/MainForm.cs](src/MainForm.cs) | Main UI: 8 tab pages, config load/save, DPI sync, DWM border theming |
+| [src/ScreenRecorder.cs](src/ScreenRecorder.cs) / [src/MediaFoundation.cs](src/MediaFoundation.cs) | Screen capture engine (GDI + frame pacing) / MP4 encoding (Media Foundation, zero deps) |
+| [src/RecordingHud.cs](src/RecordingHud.cs) / [src/CountdownForm.cs](src/CountdownForm.cs) | Recording control bar / 3-second countdown overlay |
 | [src/InputSimulator.cs](src/InputSimulator.cs) | Input injection hub: SendInput / SendMessage / Interception routing |
 | [src/Humanizer.cs](src/Humanizer.cs) | Humanization engine |
 | [src/HotkeyManager.cs](src/HotkeyManager.cs) | Global hotkey engine (low-level hooks) |
@@ -115,6 +121,7 @@ On the "Sound FX" page you can bind any single key or combo to a wav/mp3 sound f
 - **Antivirus false positives / deleted files**: automation & injection tools are prone to heuristic false positives (Kaspersky previously deleted it). Add the program folder to your antivirus exclusions.
 - **Hotkey does nothing**: it may be occupied by another program — pick a different combo.
 - **Game still detects the script**: try in the order of the "Advanced" page: keep humanization on → switch to SendMessage injection → install the Interception driver.
+- **Recording stutters or the file is huge**: drop the resolution/frame rate one step (1440p60 needs a fast machine); if a game window uses hardware acceleration and cannot be captured directly, the recorder falls back to screen capture automatically.
 - **Reset to defaults**: delete `config.json` in the program folder.
 
 ## ⚠️ Disclaimer
