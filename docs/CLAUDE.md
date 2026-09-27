@@ -34,12 +34,15 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 | 文件 | 职责 |
 |---|---|
 | [Program.cs](../src/Program.cs) | 入口：`EnablePerMonitorDpiAware()`（PMv2 感知，失败回退系统感知）+ 启动 MainForm |
-| [MainForm.cs](../src/MainForm.cs) | **主界面（~3200 行，最大文件）**：7 个胶囊标签页、配置加载/保存、事件列表虚拟模式渲染、各引擎开关的桥接、DPI 同步（SyncDpi）、DWM 边框主题、标题栏非客户区自绘置顶图钉、点击空白处让输入框失焦 |
+| [MainForm.cs](../src/MainForm.cs) | **主界面（~3700 行，最大文件）**：8 个胶囊标签页、配置加载/保存、事件列表虚拟模式渲染、各引擎开关的桥接、DPI 同步（SyncDpi）、DWM 边框主题、标题栏非客户区自绘置顶图钉、点击空白处让输入框失焦 |
 | [Clay.cs](../src/Clay.cs) | **自绘控件库**：`Dpi` 缩放、`Clay` 绘制工具（圆角/阴影/渐变）、`ClayKit.InputShell`、`ClayButton`（**文字放不下自动缩字号** FitFont，下限 7pt 后 EndEllipsis）、`ClayCheck`、`ClayRadio`、`ClayGroup`、`ClayPanel`、`ClayNumericUpDown`（自绘▲▼）、`ClayComboBox`（OwnerDraw 自绘下拉）、`ClaySlider`（主题滑块）、`ClayMenuColorTable`/`ClayMenu`（主题右键菜单） |
 | [Theme.cs](../src/Theme.cs) | 6 套主题调色板 + 风格参数（Dark/Glow/Bevel/Radius）。`Theme.Current` 全局单例，控件 OnPaint 实时读取实现换肤 |
 | [Anim.cs](../src/Anim.cs) | **轻量动效引擎**：单个全局 Timer(16ms) 驱动，指数平滑逼近目标值（可中断/可重定向，等效可中断的 ease-out transition）；`Anim.To(setValue, current, target, tauMs)`；`EaseOutCubic`/`EaseInOutCubic`；`Anim.Enabled=false` 时全部瞬时（等效 prefers-reduced-motion）。空闲自动停 Timer |
 | [Log.cs](../src/Log.cs) | **文件日志**：写 exe 同目录 `log.txt`，`Log.Info/Warn/Error`，**异步缓冲写入**(不阻塞钩子回调，消息中 `\r\n` 转义防行注入)，超 2MB 轮转 rename 成 `log.txt.old`；退出前调 `Log.Flush()` 落盘；写失败静默忽略 |
 | [Util.cs](../src/Util.cs) | 共享小工具：`SleepInterruptible(ms, alive)` 可中断分段休眠(三引擎共用，新文件需在 build.bat 编译列表中) |
+| [MediaFoundation.cs](../src/MediaFoundation.cs) | **MP4/H.264 编码（零依赖）**：Media Foundation 的 `MFStartup`/`MFCreateSinkWriterFromURL` 等 P/Invoke + `IMFAttributes/IMFMediaType/IMFSample/IMFMediaBuffer/IMFSinkWriter` COM 接口 + `Mp4Writer`（每帧拷进复用缓冲、优先硬件编码器、失败退回软件）。**接口必须平铺基接口方法**（见坑 33） |
+| [ScreenRecorder.cs](../src/ScreenRecorder.cs) | **录屏引擎**：显示器/窗口枚举（`GetMonitors`/`GetWindows`）、GDI 抓帧（屏幕 `BitBlt/StretchBlt`、窗口 `PrintWindow` 失败退回抓屏、光标 `DrawIconEx`）、按目标帧率节拍抓帧（见坑 35）、暂停/继续、`Stop()` 后一定 `Finalize` mp4；`MonitorEntry`/`WindowEntry` 是嵌套类 |
+| [CountdownForm.cs](../src/CountdownForm.cs) | 录制前的 3 秒倒计时浮层：无边框、置顶、`ShowWithoutActivation`（不抢游戏焦点）、`WDA_EXCLUDEFROMCAPTURE`（不会被录进视频），倒计时结束的回调里才真正开始抓帧 |
 | [HeldKeys.cs](../src/HeldKeys.cs) | **“注入后未抬起”按键集合**（vk → 是否扩展键）：`Add/Remove/Contains/TakeAll`。回放/连按的按住状态必须用它（不能用单值），停止时逐个补发抬起——漏掉一个键就会在系统层面永久卡住（见坑 32） |
 | [VersionInfo.cs](../src/VersionInfo.cs) | **集中版本号**（`Version` 常量）：窗口标题/关于/状态栏/日志/发布脚本共用，改版只改这里 |
 | [Lang.cs](../src/Lang.cs) | 双语字典：以**英文原文为 key**，`Lang.T(key)` 按 `Lang.Code`("zh"/"en") 翻译；控件 `Name` 属性存英文原文，语言切换时 `ApplyLangWalk` 按 Name 递归刷新 |
@@ -51,7 +54,7 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 | [MacroPlayer.cs](../src/MacroPlayer.cs) | 宏回放线程：按 DelayMs 分段 sleep 后 PlayEvent，支持倍速/循环；Move 事件的轨迹移动从延迟预算中扣除时间；**按住状态是 `Run()` 局部 HeldState**(停止时 finally 补发全部抬起)；「运行到时刻」跨天判定(目标时刻已过=次日)；**代际计数防 Stop→Start 竞态** |
 | [AutoClicker.cs](../src/AutoClicker.cs) | 鼠标连点引擎（后台线程循环，代际计数防竞态） |
 | [KeyboardSpammer.cs](../src/KeyboardSpammer.cs) | 键盘连按引擎（Tap/Hold 两模式，**用 `Hotkey Combo` 支持多键同时按下**，代际计数防竞态） |
-| [RunLimit.cs](../src/RunLimit.cs) | **三个功能共用的运行限制控件**：`RunLimitMode`(Count/Infinite/Duration) + `RunLimitBox`（指定次数 / 无限循环 / 运行时长↔截止时刻双向同步）。三个页面用**同一 Size/Location** 嵌入（Run options 卡片 y=158 高 118，控件 12,30,516,78），保证位置一致 |
+| [RunLimit.cs](../src/RunLimit.cs) | **三个功能共用的运行限制控件**：`RunLimitMode`(Count/Infinite/Duration) + `RunLimitBox`（指定次数 / 无限循环 / 运行时长↔截止时刻双向同步）。三个页面用**同一 Size/Location** 嵌入（Run options 卡片 y=158 高 128，控件 12,30,516,90），保证位置一致 |
 | [SoundFx.cs](../src/SoundFx.cs) | 按键音效：`SfxPlayer`（MCI 播放 wav/mp3，覆盖式：新播放前 stop+close 旧音效；`WarmUp()` 预热）+ `SfxManager`（键盘钩子按绑定表触发，只监听不拦截，过滤注入按键）。**所有 MCI 调用都在一条常驻线程 `SfxPlayer` 上串行执行**（见坑 28） |
 | [AppConfig.cs](../src/AppConfig.cs) | 配置模型（JavaScriptSerializer 序列化到 `config.json`）+ `MacrosDir`/`SoundsDir` 目录常量与 `EnsureDataDirs()` |
 | [AutoStart.cs](../src/AutoStart.cs) | **开机自启动**：`IsEnabled()`/`SetEnabled(bool)` 写/删 `HKCU\...\CurrentVersion\Run` 的 `AutoClickerTool` 值（值=带引号 exe 路径，失败静默） |
@@ -121,6 +124,15 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 - 启动流程：`Load` → 按语言/主题构建 UI → `ApplyConfigToUi` 回填（`_applying` 标志抑制控件事件）→ `PushToEngines` 把注入/拟人化设置同步到各静态引擎
 - **新增配置项**：AppConfig 加字段 + ApplyConfigToUi 回填 + SaveSettings 同步 + PushToEngines 转给引擎（按需），缺一不可
 
+### 4.10 录屏（录制视频页 → MP4）
+- **零依赖**：抓屏用 GDI，编码用系统自带的 Media Foundation（`mfplat.dll` + `mfreadwrite.dll`），不打包 ffmpeg、不引 NuGet
+- **数据流**：`CountdownForm`(3 秒浮层) → `ScreenRecorder.Start(...)` 起后台线程 → `Mp4Writer.Open`(H.264/MP4，硬件编码器优先) → 循环 { `GrabFrame`(抓进自上而下 32bpp DIB section) → `DrawCursor` → `WriteFrame`(时间戳取真实时钟，掉帧时视频时长仍正确) } → `Stop()` → `Finish()`(写 moov 索引，否则文件不可播)
+- **参数**：录制目标（指定屏幕 / 指定窗口）、分辨率（原始 / 720p / 1080p / 1440p，按源比例缩放并取偶数）、帧率（15/24/30/60）、输出目录（默认 exe 同目录 `Videos`）、是否隐藏本窗口、是否录光标、倒计时秒数
+- **码率**：按 0.1 bit/(像素·帧) 估算（1080p30 ≈ 6 Mbps），钳在 2~40 Mbps
+- **配置项**：`RecTargetMode/RecMonitorIndex/RecWindowTitle/RecHeight/RecFps/RecOutDir/RecHideSelf/RecCursor/RecCountdown`（`SanitizeUntrusted` 收敛非法值；窗口按标题匹配，句柄重启后会变）
+- **与其它功能的关系**：`StopAll()`(F12) 也会停录屏；`Shutdown` 里 `WaitExit(2500)` 等 mp4 收尾；录制中窗口可隐藏，用 F12 / 托盘停止
+- **实测性能**（本机 1280x720 虚拟屏 + 硬件编码）：720p30 ≈ 30.5fps、720p60 ≈ 58.8fps，逐帧抓取约 17~27ms
+
 ### 4.9 启动与系统托盘
 - 两个开关在「高级设置」页「启动」卡片：`AutoStart`(开机自启动) / `StartMinimized`(静默启动)
 - 开机自启动：`AutoStart.SetEnabled(bool)` 写/删 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 的 `AutoClickerTool` 值(值 = 带引号的 exe 路径)。ctor 里 `SetEnabled(_cfg.AutoStart)` 幂等对齐注册表与配置；勾选时即时写注册表 + 保存
@@ -130,10 +142,10 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 
 ## 5. UI 结构
 
-- 顶部栏：热键提示文字 + **「窗口置顶」图钉按钮（`btnTopmost`，📌 图标，右上角；`Tab=true` 胶囊样式，`Selected` 高亮 = 置顶中；点击走 `SetTopmost`，与托盘菜单同步）**；胶囊标签条（**7 页**：鼠标连点/键盘连按/录制回放/热键/高级设置/音效/宏库）；底部状态栏（`SetStatus()` 写消息，自动加 ToolTip；左侧 `lblStatusDot` 是运行指示点——任一引擎运行 = `Clay.Run` 色、空闲 = `Clay.InkSoft`，由 `UpdateStatusDot()` 刷新，挂在 `UpdateAllUi()` 与 300ms 状态定时器上）。**语言切换时 `ApplyLanguage` 末尾 `SetStatus(Lang.T("Ready"))`**——状态栏旧消息是旧语言的快照，必须刷新
+- 顶部栏：热键提示文字 + **「窗口置顶」图钉按钮（`btnTopmost`，📌 图标，右上角；`Tab=true` 胶囊样式，`Selected` 高亮 = 置顶中；点击走 `SetTopmost`，与托盘菜单同步）**；胶囊标签条（**8 页**：鼠标连点/键盘连按/录制回放/**录制视频**/热键/高级设置/音效/宏库，下标 0~7——录屏页 = 3、宏库页 = 7，`SelectTab` 里按下标做「进入页面时刷新」）；底部状态栏（`SetStatus()` 写消息，自动加 ToolTip；左侧 `lblStatusDot` 是运行指示点——任一引擎运行 = `Clay.Run` 色、空闲 = `Clay.InkSoft`，由 `UpdateStatusDot()` 刷新，挂在 `UpdateAllUi()` 与 300ms 状态定时器上）。**语言切换时 `ApplyLanguage` 末尾 `SetStatus(Lang.T("Ready"))`**——状态栏旧消息是旧语言的快照，必须刷新
 - 分组卡片标题（`ClayGroup.OnPaint`）绘制一枚主题强调色小圆点 + 主墨色（`Clay.Ink`）标题，与卡片内 `InkSoft` 标签形成层级
-- 页面构建函数：`BuildClickerPage / BuildKeyboardPage / BuildMacroPage / BuildHotkeyPage / BuildAdvancedPage / BuildSfxPage / BuildLibraryPage(Panel page)`，签名是 `void Xxx(Panel page)`——**页面由 `BuildUi` 先创建并停靠到 `_contentPanel`，再传给构建函数填充内容**（先停靠再填充，锚点才正确）。宏库页 `BuildLibraryPage` 含已存宏列表（▶ 列快速触发 + 重命名/副本/删除，文件在 `AppConfig.MacrosDir`）+ 软件控制（自动启动程序，`Process.Start`）
-- **运行限制卡片「Run options」在三个功能页里用完全相同的 `Grp("Run options", 10, 158, 540, 114)` + `RunLimitBox(12,32,516,78)`**（鼠标连点/键盘连按/录制回放），这是刻意的：位置一致方便用户对比调整。三页的顶部设置卡分别是 Click Settings / Key Settings / Record+Play（含回放速度第二行），其余控件（开始按钮、状态、提示）位于卡片下方同一纵坐标
+- 页面构建函数：`BuildClickerPage / BuildKeyboardPage / BuildMacroPage / BuildVideoPage / BuildHotkeyPage / BuildAdvancedPage / BuildSfxPage / BuildLibraryPage(Panel page)`，签名是 `void Xxx(Panel page)`——**页面由 `BuildUi` 先创建并停靠到 `_contentPanel`，再传给构建函数填充内容**（先停靠再填充，锚点才正确）。宏库页 `BuildLibraryPage` 含已存宏列表（▶ 列快速触发 + 重命名/副本/删除，文件在 `AppConfig.MacrosDir`）+ 软件控制（自动启动程序，`Process.Start`）
+- **运行限制卡片「Run options」在三个功能页里用完全相同的 `Grp("Run options", 10, 158, 540, 128)` + `RunLimitBox(12,30,516,90)`**（鼠标连点/键盘连按/录制回放），这是刻意的：位置一致方便用户对比调整。三页的顶部设置卡分别是 Click Settings / Key Settings / Record+Play（含回放速度第二行），其余控件（开始按钮、状态、提示）位于卡片下方同一纵坐标
 - **卡片标题占位**：`ClayGroup.OnPaint` 把标题画在卡片顶部 `y≈7~27`，所以**卡内第一行控件必须从 y≥30 开始**，否则标题会和控件文字叠在一起（v2.5 修过这个 bug）
 - 「点击按键」（键盘连按页）用 `HotkeyCaptureForm` 捕获按键/多键组合，结果存 `_spamHotkey`（`Hotkey`），按钮文案由 `UpdateSpamKeyButtonText()` 维护（按钮 `Name` 留空，避免 `ApplyLangWalk` 把捕获到的按键覆盖成提示文字）
 - 循环热键提示 `lblLoopHint` 显示当前回放热键
@@ -183,6 +195,10 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
     - **按住状态必须用集合记录**（[HeldKeys.cs](../src/HeldKeys.cs)），**绝对不能用“最后一个按下的键”单值**：同时按住多个键（如 Shift+W）时单值会被覆盖，较早按下的键就收不到抬起。历史遗留：`MacroPlayer.HeldState` 曾是单值，且 `KeyUp` 会无条件把记录清零；审查报告中-3 要求的“HashSet 跟踪按住键”当时并未真正落地。
     - 三层防护：① 引擎侧集合跟踪 + `finally` 逐个补发抬起；② `InputSimulator.ReleaseAllKeys()` 在 `StopAll`/`Shutdown`/崩溃兜底里再整体释放一次；③ 录制端 `MacroRecorder` 用 `_heldKeys` 判断自动重复（只看 `_pendKey` 会漏判：按住 A 再按 B 时 A 的重复消息会被录成第二次 KeyDown），并在 `Stop()` 时为仍按住的键/鼠标键补写抬起。
     - 排查：`log.txt` 里出现 `补发抬起仍按住的按键: …` 或 `回放停止: 补发抬起 N 个仍被按住的按键/按钮` 就说明确实漏了抬起（常见于“录制时还按着键就按 F7 停止”或宏里同一键只有按下没有抬起）。旧版本遇到此现象可依次物理按一遍左右 Shift / Ctrl / Alt / Win 复位。
+
+33. **COM 互操作: 派生接口必须把基接口的方法全部平铺声明, 不能只写自己的新方法**：C# 里写 `interface IMFSample : IMFAttributes` 只声明新方法时, 运行时会把新方法派发到 **slot 0/1/2…**（也就是基接口的方法上）, 而不是基接口之后的槽位。实测症状极具迷惑性: `AddBuffer`(应为 slot 39) 调到 `GetItem` 返回 `MF_E_ATTRIBUTENOTFOUND(0xC00D36E6)`, `SetSampleTime`(应为 33) 调到 `Compare` 直接把时间戳当指针解引用 → **进程 0xC0000005 崩溃**。修法: 每个派生接口都从 IMFAttributes 的 30 个方法开始**完整平铺**（用不到的方法写 `[PreserveSig] int _A00();` 占位即可, 参数无所谓, 只要不调用）。另外 GUID 常量**不能是 `static readonly`**——`ref` 传参会编译报 CS0199。
+34. **Media Foundation 的 RGB32 输入: `MF_MT_DEFAULT_STRIDE` 用正值配自上而下位图**：`CreateDIBSection` 用负 biHeight 得到自上而下的缓冲, 此时 `MF_MT_DEFAULT_STRIDE` 必须给 **+width*4**; 给负值（按某些文档的说法）录出来的视频**上下颠倒**。这是实测结论（`mftest` 自检脚本录「上半红/下半蓝」窗口, 再用系统缩略图取色验证）, 与文档描述相反时以实测为准。改这里务必重跑自检。
+35. **录屏要按帧率跑满, 三个地方都不能省**：① 抓帧节拍不能只用 `Thread.Sleep`——默认 15.6ms 粒度 + 用 `Thread.Sleep(0)` 收尾会让出整个调度时隙, 实测把 30fps 拖成 24fps; 正确做法是 `timeBeginPeriod(1)` + 粗睡到剩 2ms + `Thread.SpinWait` 忙等收尾。② 计时起点必须在**编码器初始化之后** `clock.Restart()`, 否则第一帧时间戳是几百毫秒, 视频开头会多一段静止画面。③ 停止时一定要 `Finalize`（写 moov 索引）, 否则 mp4 直接不可播; `Shutdown` 里因此有 `_recorder2.WaitExit(2500)`。实测(1280x720 虚拟屏): 720p30 → 30.5fps, 720p60 → 58.8fps, 逐帧 17~27ms。
 
 ## 7. 验证流程
 

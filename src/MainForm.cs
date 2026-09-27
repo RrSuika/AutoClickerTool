@@ -155,6 +155,31 @@ namespace AutoClickerTool
             public int Volume;     // 生效音量 0~100
         }
 
+        // 录制视频页
+        private readonly ScreenRecorder _recorder2 = new ScreenRecorder(); // 录屏引擎(mp4)
+        private RadioButton rbRecScreen;
+        private RadioButton rbRecWindow;
+        private ComboBox cboRecMonitor;
+        private ClayComboBox cboRecWindow;
+        private ClayComboBox cboRecRes;
+        private ClayComboBox cboRecFps;
+        private TextBox txtRecDir;
+        private CheckBox chkRecHideSelf;
+        private CheckBox chkRecCursor;
+        private Button btnRecStart;
+        private Button btnRecPause;
+        private Button btnRecStop;
+        private Button btnRecBrowse;
+        private Button btnRecFolder;
+        private Button btnRecRefresh;
+        private Button btnRecGrab;
+        private Label lblRecState;
+        private Label lblRecSize;
+        private readonly List<ScreenRecorder.MonitorEntry> _monitors = new List<ScreenRecorder.MonitorEntry>();
+        private readonly List<ScreenRecorder.WindowEntry> _recWindows = new List<ScreenRecorder.WindowEntry>();
+        private CountdownForm _countdown;
+        private bool _recHideSelfActive;   // 录制期间本窗口已被隐藏(停止后要恢复)
+
         private bool _pinHot;                // 标题栏「窗口置顶」图钉是否悬停(非客户区自绘)
         private Label lblHotkeyHint;
         private ClayButton btnTopmost; // 置顶图钉按钮(顶栏右上角, Selected 高亮 = 置顶中)
@@ -229,6 +254,7 @@ namespace AutoClickerTool
                 SetStatus(Lang.T("Playback finished"));
                 if (_cfg != null && _cfg.LaunchOnEnd) LaunchPrograms();
             });
+            _recorder2.Finished += () => Ui(OnVideoRecordingFinished);
             _recorder.AutoStopRequested += () => Ui(() =>
             {
                 _recorder.Stop();
@@ -258,6 +284,7 @@ namespace AutoClickerTool
                 if (_recorder.Recording) RefreshEventList(true);
                 SyncDpi(); // 窗口所在显示器 DPI 与布局不一致时重建(跨屏移动的安全网)
                 UpdateStatusDot(); // 引擎状态可能不经 UpdateAllUi 变化, 轮询兜底刷新指示点
+                RefreshRecVideoStatus(); // 录制中的时长/帧数 + 托盘图标提示
             };
             _statusTimer.Start();
 
@@ -371,7 +398,7 @@ namespace AutoClickerTool
             // 3. 页面先停靠到内容区(立即获得最终尺寸), 再填充内容。
             Action<Panel>[] builders =
             {
-                BuildClickerPage, BuildKeyboardPage, BuildMacroPage, BuildHotkeyPage, BuildAdvancedPage, BuildSfxPage, BuildLibraryPage
+                BuildClickerPage, BuildKeyboardPage, BuildMacroPage, BuildVideoPage, BuildHotkeyPage, BuildAdvancedPage, BuildSfxPage, BuildLibraryPage
             };
             _pages = new Panel[builders.Length];
             for (int i = 0; i < builders.Length; i++)
@@ -444,7 +471,7 @@ namespace AutoClickerTool
         /// <summary>胶囊标签页条。</summary>
         private void BuildTabStrip()
         {
-            string[] tabNames = { Lang.T("Clicking"), Lang.T("Keys"), Lang.T("Recorder"), Lang.T("Hotkeys"), Lang.T("Advanced"), Lang.T("Sound"), Lang.T("Macros") };
+            string[] tabNames = { Lang.T("Clicking"), Lang.T("Keys"), Lang.T("Recorder"), Lang.T("Video"), Lang.T("Hotkeys"), Lang.T("Advanced"), Lang.T("Sound"), Lang.T("Macros") };
             _tabBtns = new Button[tabNames.Length];
             for (int i = 0; i < tabNames.Length; i++)
             {
@@ -469,7 +496,7 @@ namespace AutoClickerTool
         private void LayoutTabStrip()
         {
             if (_tabBtns == null || _tabBtns.Length == 0) return;
-            string[] names = { Lang.T("Clicking"), Lang.T("Keys"), Lang.T("Recorder"), Lang.T("Hotkeys"), Lang.T("Advanced"), Lang.T("Sound"), Lang.T("Macros") };
+            string[] names = { Lang.T("Clicking"), Lang.T("Keys"), Lang.T("Recorder"), Lang.T("Video"), Lang.T("Hotkeys"), Lang.T("Advanced"), Lang.T("Sound"), Lang.T("Macros") };
             int n = names.Length;
             int min = Dpi.X(48);
             int avail = _tabStrip.Width - Dpi.X(20);
@@ -572,7 +599,8 @@ namespace AutoClickerTool
             }
             _pages[index].CreateControl();  // 确保子控件句柄已创建, 快照才能渲染完整
             _pages[index].PerformLayout();
-            if (index == 6) RefreshMacroList(); // 每次进入宏库页刷新已存宏列表
+            if (index == 7) RefreshMacroList(); // 每次进入宏库页(下标 7)刷新已存宏列表
+            if (index == 3) { RefreshRecMonitors(); RefreshRecWindows(); } // 进入录屏页刷新显示器/窗口列表
 
             if (!same) StartReveal(SnapshotPage(_pages[index]));
         }
@@ -671,38 +699,38 @@ namespace AutoClickerTool
         {
             var gb = Grp("Click Settings", 10, 10, 540, 136);
             // 行1: 间隔 + 鼠标键(英文标签较长, 输入框右移留足间隙)
-            gb.Controls.Add(Lbl("Interval (ms):", 15, 33));
+            gb.Controls.Add(Lbl("Interval (ms):", 15, 34));
             numInterval = new ClayNumericUpDown { Minimum = 1, Maximum = 3600000, Value = 100, BorderStyle = BorderStyle.None };
-            gb.Controls.Add(ClayKit.InputShell(numInterval, 95, 29, 80));
-            gb.Controls.Add(Lbl("Mouse button:", 200, 33));
+            gb.Controls.Add(ClayKit.InputShell(numInterval, 104, 30, 80));
+            gb.Controls.Add(Lbl("Mouse button:", 200, 34));
             cboButton = new ClayComboBox();
             cboButton.Items.AddRange(new object[] { Lang.T("Left"), Lang.T("Right"), Lang.T("Middle") });
             cboButton.SelectedIndex = 0;
-            gb.Controls.Add(ClayKit.InputShell(cboButton, 310, 29, 80));
+            gb.Controls.Add(ClayKit.InputShell(cboButton, 310, 30, 80));
             // 行2: 跟随/固定坐标
-            rbFollow = new ClayRadio { Name = "Follow cursor", Text = Lang.T("Follow cursor"), Location = new Point(Dpi.X(15), Dpi.X(65)), Checked = true };
-            rbFixed = new ClayRadio { Name = "Fixed position:", Text = Lang.T("Fixed position:"), Location = new Point(Dpi.X(160), Dpi.X(65)) };
+            rbFollow = new ClayRadio { Name = "Follow cursor", Text = Lang.T("Follow cursor"), Location = new Point(Dpi.X(15), Dpi.X(64)), Checked = true };
+            rbFixed = new ClayRadio { Name = "Fixed position:", Text = Lang.T("Fixed position:"), Location = new Point(Dpi.X(160), Dpi.X(64)) };
             // 行3: 固定坐标 X/Y + 抓取按钮
             numX = new ClayNumericUpDown { Minimum = 0, Maximum = 20000, Value = 0, BorderStyle = BorderStyle.None };
             numY = new ClayNumericUpDown { Minimum = 0, Maximum = 20000, Value = 0, BorderStyle = BorderStyle.None };
-            gb.Controls.Add(ClayKit.InputShell(numX, 160, 85, 70));
-            gb.Controls.Add(ClayKit.InputShell(numY, 245, 85, 70));
-            btnGetPos = new ClayButton { Name = "Get mouse position", Text = Lang.T("Get mouse position"), Location = new Point(Dpi.X(330), Dpi.X(84)), Size = new Size(Dpi.X(140), Dpi.X(26)) };
+            gb.Controls.Add(ClayKit.InputShell(numX, 160, 92, 70));
+            gb.Controls.Add(ClayKit.InputShell(numY, 245, 92, 70));
+            btnGetPos = new ClayButton { Name = "Get mouse position", Text = Lang.T("Get mouse position"), Location = new Point(Dpi.X(330), Dpi.X(91)), Size = new Size(Dpi.X(140), Dpi.X(26)) };
             gb.Controls.AddRange(new Control[] { rbFollow, rbFixed, btnGetPos });
             page.Controls.Add(gb);
 
             // 运行限制: 与「键盘连按」「录制回放」页完全同一坐标(方便三个功能对比调整)
-            var gbRun = Grp("Run options", 10, 158, 540, 118);
-            _clickLimit = new RunLimitBox { Location = new Point(Dpi.X(12), Dpi.X(30)), Size = new Size(Dpi.X(516), Dpi.X(78)) };
+            var gbRun = Grp("Run options", 10, 158, 540, 128);
+            _clickLimit = new RunLimitBox { Location = new Point(Dpi.X(12), Dpi.X(30)), Size = new Size(Dpi.X(516), Dpi.X(90)) };
             gbRun.Controls.Add(_clickLimit);
             page.Controls.Add(gbRun);
 
-            btnClickerToggle = new ClayButton { Text = Lang.F("Start clicking ({0})", "F6"), Location = new Point(Dpi.X(15), Dpi.X(288)), Size = new Size(Dpi.X(175), Dpi.X(42)), Accent = true, BackColor = Clay.WindowBg };
-            btnTestClick = new ClayButton { Name = "Test", Text = Lang.T("Test"), Location = new Point(Dpi.X(200), Dpi.X(288)), Size = new Size(Dpi.X(100), Dpi.X(42)), Mint = true, BackColor = Clay.WindowBg };
-            lblClickerState = new Label { Text = Lang.T("Status: Idle"), Location = new Point(Dpi.X(310), Dpi.X(301)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
+            btnClickerToggle = new ClayButton { Text = Lang.F("Start clicking ({0})", "F6"), Location = new Point(Dpi.X(15), Dpi.X(296)), Size = new Size(Dpi.X(175), Dpi.X(42)), Accent = true, BackColor = Clay.WindowBg };
+            btnTestClick = new ClayButton { Name = "Test", Text = Lang.T("Test"), Location = new Point(Dpi.X(200), Dpi.X(296)), Size = new Size(Dpi.X(100), Dpi.X(42)), Mint = true, BackColor = Clay.WindowBg };
+            lblClickerState = new Label { Text = Lang.T("Status: Idle"), Location = new Point(Dpi.X(310), Dpi.X(309)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
             page.Controls.AddRange(new Control[] { btnClickerToggle, btnTestClick, lblClickerState });
 
-            page.Controls.Add(Tip("Tip: move the mouse to the target after starting. Do not click Start while the cursor is on the button,\r\nor it will click the button itself. If the game blocks standard injection, switch method in Advanced.", 12, 338));
+            page.Controls.Add(Tip("Tip: move the mouse to the target after starting. Do not click Start while the cursor is on the button,\r\nor it will click the button itself. If the game blocks standard injection, switch method in Advanced.", 12, 348));
         }
 
         private void BuildKeyboardPage(Panel page)
@@ -721,32 +749,33 @@ namespace AutoClickerTool
             gb.Controls.Add(shellKey);
 
             // 行2: 「点击按键」——捕获一个按键, 也可以同时按下多个键捕获成组合键(如 Shift+A)
-            gb.Controls.Add(Lbl("Click key:", 15, 60));
-            btnSpamKey = new ClayButton { Text = Lang.T("Click key"), Location = new Point(Dpi.X(115), Dpi.X(56)), Size = new Size(Dpi.X(150), Dpi.X(26)) };
+            // 与「按键」同一行(合并后行距才够, 原布局这一行与上一行贴着)
+            gb.Controls.Add(Lbl("Click key:", 200, 34));
+            btnSpamKey = new ClayButton { Text = Lang.T("Click key"), Location = new Point(Dpi.X(285), Dpi.X(30)), Size = new Size(Dpi.X(150), Dpi.X(26)) };
             gb.Controls.Add(btnSpamKey);
 
-            // 行3: 间隔
-            gb.Controls.Add(Lbl("Interval (ms):", 15, 90));
+            // 行2: 间隔
+            gb.Controls.Add(Lbl("Interval (ms):", 15, 66));
             numKeyInterval = new ClayNumericUpDown { Minimum = 1, Maximum = 3600000, Value = 100, BorderStyle = BorderStyle.None };
-            gb.Controls.Add(ClayKit.InputShell(numKeyInterval, 115, 86, 80));
+            gb.Controls.Add(ClayKit.InputShell(numKeyInterval, 115, 62, 80));
 
-            // 行4: 点按/按住
-            rbTap = new ClayRadio { Name = "Tap (click once per interval)", Text = Lang.T("Tap (click once per interval)"), Location = new Point(Dpi.X(15), Dpi.X(114)), Checked = true };
-            rbHold = new ClayRadio { Name = "Hold (until stopped)", Text = Lang.T("Hold (until stopped)"), Location = new Point(Dpi.X(220), Dpi.X(114)) };
+            // 行3: 点按/按住
+            rbTap = new ClayRadio { Name = "Tap (click once per interval)", Text = Lang.T("Tap (click once per interval)"), Location = new Point(Dpi.X(15), Dpi.X(102)), Checked = true };
+            rbHold = new ClayRadio { Name = "Hold (until stopped)", Text = Lang.T("Hold (until stopped)"), Location = new Point(Dpi.X(220), Dpi.X(102)) };
             gb.Controls.AddRange(new Control[] { rbTap, rbHold });
             page.Controls.Add(gb);
 
             // 运行限制: 与「鼠标连点」「录制回放」页完全同一坐标
-            var gbRun = Grp("Run options", 10, 158, 540, 118);
-            _spamLimit = new RunLimitBox { Location = new Point(Dpi.X(12), Dpi.X(30)), Size = new Size(Dpi.X(516), Dpi.X(78)) };
+            var gbRun = Grp("Run options", 10, 158, 540, 128);
+            _spamLimit = new RunLimitBox { Location = new Point(Dpi.X(12), Dpi.X(30)), Size = new Size(Dpi.X(516), Dpi.X(90)) };
             gbRun.Controls.Add(_spamLimit);
             page.Controls.Add(gbRun);
 
-            btnKeyboardToggle = new ClayButton { Text = Lang.F("Start spam ({0})", "F9"), Location = new Point(Dpi.X(15), Dpi.X(288)), Size = new Size(Dpi.X(170), Dpi.X(42)), Accent = true, BackColor = Clay.WindowBg };
-            lblKeyboardState = new Label { Text = Lang.T("Status: Idle"), Location = new Point(Dpi.X(195), Dpi.X(301)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
+            btnKeyboardToggle = new ClayButton { Text = Lang.F("Start spam ({0})", "F9"), Location = new Point(Dpi.X(15), Dpi.X(296)), Size = new Size(Dpi.X(170), Dpi.X(42)), Accent = true, BackColor = Clay.WindowBg };
+            lblKeyboardState = new Label { Text = Lang.T("Status: Idle"), Location = new Point(Dpi.X(195), Dpi.X(309)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
             page.Controls.AddRange(new Control[] { btnKeyboardToggle, lblKeyboardState });
 
-            page.Controls.Add(Tip("Tip: keys go to the foreground window. Switch to the target window first, then toggle with the hotkey.\r\nClick \"Click key\" to capture one key, or press several keys together (e.g. Shift+A) to spam them simultaneously.", 12, 338));
+            page.Controls.Add(Tip("Tip: keys go to the foreground window. Switch to the target window first, then toggle with the hotkey.\r\nClick \"Click key\" to capture one key, or press several keys together (e.g. Shift+A) to spam them simultaneously.", 12, 348));
         }
 
         private void BuildMacroPage(Panel page)
@@ -770,16 +799,16 @@ namespace AutoClickerTool
             page.Controls.Add(gbRec);
 
             // 运行限制: 与「鼠标连点」「键盘连按」页完全同一坐标(指定次数 / 无限循环 / 运行时长到点)
-            var gbRun = Grp("Run options", 10, 158, 540, 118);
-            _playLimit = new RunLimitBox { Location = new Point(Dpi.X(12), Dpi.X(30)), Size = new Size(Dpi.X(516), Dpi.X(78)) };
+            var gbRun = Grp("Run options", 10, 158, 540, 128);
+            _playLimit = new RunLimitBox { Location = new Point(Dpi.X(12), Dpi.X(30)), Size = new Size(Dpi.X(516), Dpi.X(90)) };
             gbRun.Controls.Add(_playLimit);
             page.Controls.Add(gbRun);
 
             // 事件列表(虚拟模式: 录制时实时刷新, 20 万条也流畅)
             var lstShell = new ClayPanel
             {
-                Location = new Point(Dpi.X(10), Dpi.X(288)),
-                Size = new Size(Dpi.X(420), Dpi.X(96)),
+                Location = new Point(Dpi.X(10), Dpi.X(296)),
+                Size = new Size(Dpi.X(420), Dpi.X(90)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Inset = true,
                 BackColor = Theme.Current.InputBg
@@ -787,7 +816,7 @@ namespace AutoClickerTool
             lstEvents = new ListView
             {
                 Location = new Point(Dpi.X(4), Dpi.X(4)),
-                Size = new Size(Dpi.X(412), Dpi.X(88)),
+                Size = new Size(Dpi.X(412), Dpi.X(82)),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
                 View = View.Details,
                 VirtualMode = true,
@@ -854,15 +883,499 @@ namespace AutoClickerTool
             };
 
             // 事件编辑按钮
-            btnEditDelay = new ClayButton { Name = "Edit delay", Text = Lang.T("Edit delay"), Location = new Point(Dpi.X(440), Dpi.X(288)), Size = new Size(Dpi.X(110), Dpi.X(30)) };
-            btnAddEvent = new ClayButton { Name = "Add event", Text = Lang.T("Add event"), Location = new Point(Dpi.X(440), Dpi.X(318)), Size = new Size(Dpi.X(110), Dpi.X(30)) };
-            btnDeleteEvent = new ClayButton { Name = "Delete selected", Text = Lang.T("Delete selected"), Location = new Point(Dpi.X(440), Dpi.X(348)), Size = new Size(Dpi.X(110), Dpi.X(30)) };
+            // 三个按钮之间留 6px 间距(原来 30 高的按钮上下紧贴, 看起来像一整个大框)
+            btnEditDelay = new ClayButton { Name = "Edit delay", Text = Lang.T("Edit delay"), Location = new Point(Dpi.X(440), Dpi.X(296)), Size = new Size(Dpi.X(110), Dpi.X(26)) };
+            btnAddEvent = new ClayButton { Name = "Add event", Text = Lang.T("Add event"), Location = new Point(Dpi.X(440), Dpi.X(328)), Size = new Size(Dpi.X(110), Dpi.X(26)) };
+            btnDeleteEvent = new ClayButton { Name = "Delete selected", Text = Lang.T("Delete selected"), Location = new Point(Dpi.X(440), Dpi.X(360)), Size = new Size(Dpi.X(110), Dpi.X(26)) };
             page.Controls.AddRange(new Control[] { btnEditDelay, btnAddEvent, btnDeleteEvent });
 
-            lblEventCount = new Label { Text = Lang.F("Events: {0}", 0), Location = new Point(Dpi.X(15), Dpi.X(388)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
+            lblEventCount = new Label { Text = Lang.F("Events: {0}", 0), Location = new Point(Dpi.X(15), Dpi.X(392)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.WindowBg };
             page.Controls.Add(lblEventCount);
 
-            page.Controls.Add(Tip("Tip: recording captures mouse moves, clicks, wheel and keys; bound hotkeys and injected clicks are excluded.", 12, 408));
+            page.Controls.Add(Tip("Tip: records mouse moves, clicks, wheel and keys; bound hotkeys are skipped.", 12, 414));
+        }
+
+
+        // ---------- 录制视频(录屏 → MP4) ----------
+
+        private void BuildVideoPage(Panel page)
+        {
+            // 卡片 1: 录制目标(指定屏幕 / 指定窗口)
+            var gbTarget = Grp("Recording target", 10, 10, 540, 124);
+            rbRecScreen = new ClayRadio { Name = "Screen", Text = Lang.T("Screen"), Location = new Point(Dpi.X(15), Dpi.X(30)), Checked = true };
+            rbRecWindow = new ClayRadio { Name = "Window", Text = Lang.T("Window"), Location = new Point(Dpi.X(150), Dpi.X(30)) };
+            gbTarget.Controls.AddRange(new Control[] { rbRecScreen, rbRecWindow });
+
+            gbTarget.Controls.Add(Lbl("Monitor:", 15, 62));
+            cboRecMonitor = new ClayComboBox();
+            gbTarget.Controls.Add(ClayKit.InputShell(cboRecMonitor, 100, 58, 226));
+
+            gbTarget.Controls.Add(Lbl("Window:", 15, 92));
+            cboRecWindow = new ClayComboBox();
+            gbTarget.Controls.Add(ClayKit.InputShell(cboRecWindow, 100, 88, 226));
+            btnRecRefresh = new ClayButton { Name = "Refresh list", Text = Lang.T("Refresh list"), Location = new Point(Dpi.X(334), Dpi.X(88)), Size = new Size(Dpi.X(76), Dpi.X(26)) };
+            btnRecGrab = new ClayButton { Name = "Grab foreground window", Text = Lang.T("Grab foreground window"), Location = new Point(Dpi.X(418), Dpi.X(88)), Size = new Size(Dpi.X(112), Dpi.X(26)) };
+            gbTarget.Controls.AddRange(new Control[] { btnRecRefresh, btnRecGrab });
+            page.Controls.Add(gbTarget);
+
+            // 卡片 2: 输出设置(分辨率 / 帧率 / 保存目录)
+            var gbOut = Grp("Output", 10, 140, 540, 120);
+            gbOut.Controls.Add(Lbl("Resolution:", 15, 32));
+            cboRecRes = new ClayComboBox();
+            cboRecRes.Items.AddRange(new object[] { Lang.T("Native (source)"), Lang.T("720p (HD)"), Lang.T("1080p (Full HD)"), Lang.T("1440p (2K)") });
+            cboRecRes.SelectedIndex = 2;
+            gbOut.Controls.Add(ClayKit.InputShell(cboRecRes, 110, 28, 140));
+            gbOut.Controls.Add(Lbl("Frame rate:", 270, 32));
+            cboRecFps = new ClayComboBox();
+            cboRecFps.Items.AddRange(new object[] { "15 fps", "24 fps", "30 fps", "60 fps" });
+            cboRecFps.SelectedIndex = 2;
+            gbOut.Controls.Add(ClayKit.InputShell(cboRecFps, 365, 28, 110));
+
+            gbOut.Controls.Add(Lbl("Save to:", 15, 62));
+            txtRecDir = new TextBox { BorderStyle = BorderStyle.None };
+            gbOut.Controls.Add(ClayKit.InputShell(txtRecDir, 100, 58, 250));
+            btnRecBrowse = new ClayButton { Name = "Browse...", Text = Lang.T("Browse..."), Location = new Point(Dpi.X(358), Dpi.X(58)), Size = new Size(Dpi.X(76), Dpi.X(26)) };
+            btnRecFolder = new ClayButton { Name = "Open folder", Text = Lang.T("Open folder"), Location = new Point(Dpi.X(442), Dpi.X(58)), Size = new Size(Dpi.X(88), Dpi.X(26)) };
+            chkRecHideSelf = new ClayCheck { Name = "Hide this window while recording", Text = Lang.T("Hide this window while recording"), Location = new Point(Dpi.X(15), Dpi.X(88)), Checked = true };
+            chkRecCursor = new ClayCheck { Name = "Include mouse cursor", Text = Lang.T("Include mouse cursor"), Location = new Point(Dpi.X(300), Dpi.X(88)), Checked = true };
+            gbOut.Controls.AddRange(new Control[] { btnRecBrowse, btnRecFolder, chkRecHideSelf, chkRecCursor });
+            page.Controls.Add(gbOut);
+
+            // 卡片 3: 录制控制(开始 / 暂停 / 停止并保存)
+            var gbCtl = Grp("Recording control", 10, 266, 540, 106);
+            btnRecStart = new ClayButton { Name = "", Text = Lang.T("Start recording"), Location = new Point(Dpi.X(15), Dpi.X(30)), Size = new Size(Dpi.X(130), Dpi.X(34)), Accent = true };
+            btnRecPause = new ClayButton { Name = "", Text = Lang.T("Pause"), Location = new Point(Dpi.X(155), Dpi.X(30)), Size = new Size(Dpi.X(100), Dpi.X(34)) };
+            btnRecStop = new ClayButton { Name = "", Text = Lang.T("Stop and save"), Location = new Point(Dpi.X(265), Dpi.X(30)), Size = new Size(Dpi.X(130), Dpi.X(34)), Danger = true };
+            lblRecSize = new Label { Location = new Point(Dpi.X(408), Dpi.X(39)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.CardBg };
+            gbCtl.Controls.AddRange(new Control[] { btnRecStart, btnRecPause, btnRecStop, lblRecSize });
+            lblRecState = new Label
+            {
+                Location = new Point(Dpi.X(15), Dpi.X(74)),
+                Size = new Size(Dpi.X(515), Dpi.X(18)),
+                AutoEllipsis = true,
+                ForeColor = Clay.InkSoft,
+                BackColor = Clay.CardBg,
+                Text = Lang.T("Not recording")
+            };
+            gbCtl.Controls.Add(lblRecState);
+            page.Controls.Add(gbCtl);
+
+            page.Controls.Add(Tip("Tip: saved as MP4 (H.264) - Recording_YYYYMMDD_HHMMSS.mp4 in the folder above.\r\n3-second countdown; pause/resume anytime. High resolution/fps needs a fast PC.", 12, 380));
+        }
+
+        /// <summary>录屏输出目录(界面里为空则用默认 Videos)。</summary>
+        private string RecOutDir()
+        {
+            string d = txtRecDir == null ? "" : txtRecDir.Text.Trim();
+            if (d.Length == 0) d = AppConfig.VideosDir;
+            return d;
+        }
+
+        private static int RecResIndex(int height)
+        {
+            if (height == 720) return 1;
+            if (height == 1080) return 2;
+            if (height == 1440) return 3;
+            return 0;
+        }
+
+        private static int RecFpsIndex(int fps)
+        {
+            if (fps == 15) return 0;
+            if (fps == 24) return 1;
+            if (fps == 60) return 3;
+            return 2;
+        }
+
+        private int SelectedRecHeight()
+        {
+            int i = cboRecRes == null ? 2 : cboRecRes.SelectedIndex;
+            if (i == 1) return 720;
+            if (i == 2) return 1080;
+            if (i == 3) return 1440;
+            return 0;
+        }
+
+        private int SelectedRecFps()
+        {
+            int[] fps = { 15, 24, 30, 60 };
+            int i = cboRecFps == null ? 2 : cboRecFps.SelectedIndex;
+            if (i < 0 || i >= fps.Length) return 30;
+            return fps[i];
+        }
+
+        /// <summary>按标题选中之前保存的录制窗口(句柄重启后会变, 只能靠标题找回)。</summary>
+        private void SelectRecWindowByTitle(string title)
+        {
+            if (cboRecWindow == null || string.IsNullOrEmpty(title)) return;
+            for (int i = 0; i < _recWindows.Count; i++)
+            {
+                if (_recWindows[i].Title == title)
+                {
+                    cboRecWindow.SelectedIndex = i;
+                    return;
+                }
+            }
+        }
+
+        private IntPtr SelectedRecWindow()
+        {
+            int i = cboRecWindow == null ? -1 : cboRecWindow.SelectedIndex;
+            if (i < 0 || i >= _recWindows.Count) return IntPtr.Zero;
+            return _recWindows[i].Handle;
+        }
+
+        /// <summary>刷新显示器下拉(进入页面/切语言时调用)。</summary>
+        private void RefreshRecMonitors()
+        {
+            if (cboRecMonitor == null) return;
+            int keep = cboRecMonitor.SelectedIndex;
+            _monitors.Clear();
+            _monitors.AddRange(ScreenRecorder.GetMonitors());
+            cboRecMonitor.Items.Clear();
+            for (int i = 0; i < _monitors.Count; i++)
+            {
+                ScreenRecorder.MonitorEntry m = _monitors[i];
+                string s = Lang.F("Display {0}: {1}x{2}", i + 1, m.Bounds.Width, m.Bounds.Height);
+                if (m.Primary) s += " " + Lang.T("(primary)");
+                cboRecMonitor.Items.Add(s);
+            }
+            if (cboRecMonitor.Items.Count == 0)
+            {
+                cboRecMonitor.Items.Add(Lang.T("No monitor found"));
+                cboRecMonitor.SelectedIndex = 0;
+            }
+            else if (keep >= 0 && keep < cboRecMonitor.Items.Count) cboRecMonitor.SelectedIndex = keep;
+            else cboRecMonitor.SelectedIndex = 0;
+            UpdateRecTargetUi();
+        }
+
+        /// <summary>刷新可录制窗口列表(枚举当前可见的顶层窗口)。</summary>
+        private void RefreshRecWindows()
+        {
+            if (cboRecWindow == null) return;
+            string keep = cboRecWindow.Text;
+            _recWindows.Clear();
+            _recWindows.AddRange(ScreenRecorder.GetWindows());
+            cboRecWindow.Items.Clear();
+            foreach (ScreenRecorder.WindowEntry w in _recWindows) cboRecWindow.Items.Add(w.Title);
+            if (cboRecWindow.Items.Count == 0)
+            {
+                cboRecWindow.Items.Add(Lang.T("(click refresh to list windows)"));
+                cboRecWindow.SelectedIndex = 0;
+            }
+            else
+            {
+                int idx = -1;
+                for (int i = 0; i < _recWindows.Count; i++)
+                {
+                    if (_recWindows[i].Title == keep) { idx = i; break; }
+                }
+                cboRecWindow.SelectedIndex = idx >= 0 ? idx : 0;
+            }
+            UpdateRecTargetUi();
+        }
+
+        /// <summary>屏幕/窗口两种模式下的可用状态与提示。</summary>
+        private void UpdateRecTargetUi()
+        {
+            if (cboRecMonitor == null) return;
+            bool window = rbRecWindow.Checked;
+            cboRecMonitor.Enabled = !window;
+            cboRecWindow.Enabled = window;
+            btnRecRefresh.Enabled = window;
+            btnRecGrab.Enabled = window;
+            UpdateRecSizeInfo();
+        }
+
+        /// <summary>右上角显示"输出分辨率 · 帧率", 让用户确认缩放结果。</summary>
+        private void UpdateRecSizeInfo()
+        {
+            if (lblRecSize == null) return;
+            Rectangle src = Rectangle.Empty;
+            if (rbRecWindow.Checked) ScreenRecorder.GetWindowRect(SelectedRecWindow(), out src);
+            else
+            {
+                int i = cboRecMonitor.SelectedIndex;
+                if (i >= 0 && i < _monitors.Count) src = _monitors[i].Bounds;
+            }
+            if (src.Width < 16) { lblRecSize.Text = ""; return; }
+            int h = SelectedRecHeight();
+            if (h <= 0) h = src.Height;
+            int w = (int)Math.Round((double)src.Width * h / src.Height);
+            lblRecSize.Text = w + "×" + h + "  " + SelectedRecFps() + "fps";
+        }
+
+        /// <summary>倒计时浮层要居中的目标区域(窗口模式下跟随窗口)。</summary>
+        private Rectangle RecTargetRect()
+        {
+            Rectangle r;
+            if (rbRecWindow.Checked)
+            {
+                if (ScreenRecorder.GetWindowRect(SelectedRecWindow(), out r)) return r;
+                return Screen.FromPoint(Cursor.Position).Bounds;
+            }
+            int i = cboRecMonitor.SelectedIndex;
+            if (i >= 0 && i < _monitors.Count) return _monitors[i].Bounds;
+            return Screen.PrimaryScreen.Bounds;
+        }
+
+        private void BrowseRecDir()
+        {
+            try
+            {
+                using (var dlg = new FolderBrowserDialog())
+                {
+                    dlg.Description = Lang.T("Choose the folder where recordings are saved");
+                    dlg.SelectedPath = RecOutDir();
+                    if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                    txtRecDir.Text = dlg.SelectedPath;
+                    SaveSettings();
+                    SetStatus(Lang.F("Video folder: {0}", dlg.SelectedPath));
+                }
+            }
+            catch (Exception ex)
+            {
+                SetStatus(Lang.F("Save failed: {0}", ex.Message));
+            }
+        }
+
+        private void OpenRecFolder()
+        {
+            try
+            {
+                string dir = RecOutDir();
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                Process.Start("explorer.exe", "\"" + dir + "\"");
+            }
+            catch (Exception ex)
+            {
+                SetStatus(Lang.F("Save failed: {0}", ex.Message));
+            }
+        }
+
+        /// <summary>抓取前台窗口: 3 秒后取当前前台窗口(期间用户切到目标窗口)。</summary>
+        private void GrabRecWindow()
+        {
+            btnRecGrab.Enabled = false;
+            btnRecGrab.Text = Lang.T("Grabbing in 3s...");
+            SetStatus(Lang.T("Switch to the target window within 3 seconds"));
+            var timer = new System.Windows.Forms.Timer { Interval = 3000 };
+            timer.Tick += delegate
+            {
+                timer.Stop();
+                timer.Dispose();
+                if (IsDisposed || Disposing) return;
+                IntPtr h = NativeMethods.GetForegroundWindow();
+                RefreshRecWindows();
+                if (h != IntPtr.Zero)
+                {
+                    int idx = -1;
+                    for (int i = 0; i < _recWindows.Count; i++)
+                    {
+                        if (_recWindows[i].Handle == h) { idx = i; break; }
+                    }
+                    if (idx >= 0)
+                    {
+                        cboRecWindow.SelectedIndex = idx;
+                        SetStatus(Lang.F("Grabbed window: {0}", _recWindows[idx].Title));
+                    }
+                    else SetStatus(Lang.T("Foreground window not found in the list, please pick one manually"));
+                }
+                btnRecGrab.Text = Lang.T("Grab foreground window");
+                btnRecGrab.Enabled = rbRecWindow.Checked;
+                UpdateRecSizeInfo();
+            };
+            timer.Start();
+        }
+
+        // ---------- 录屏控制 ----------
+
+        private string _recPath = "";
+        private int _recMonitorIndex;
+        private IntPtr _recWindowHandle = IntPtr.Zero;
+        private int _recOutHeight;
+        private int _recFps = 30;
+        private bool _recCursor = true;
+        private bool _recSelfWasVisible;
+
+        /// <summary>开始录制: 校验目标 → 隐藏自身 → 倒计时浮层 → 真正开抓。</summary>
+        private void StartVideoRecording()
+        {
+            if (_recorder2.Running) return;
+            bool windowMode = rbRecWindow.Checked;
+            if (windowMode && SelectedRecWindow() == IntPtr.Zero)
+            {
+                SetStatus(Lang.T("No window selected. Click \"Refresh list\" and pick one."));
+                return;
+            }
+            if (!windowMode && _monitors.Count == 0)
+            {
+                RefreshRecMonitors();
+                if (_monitors.Count == 0)
+                {
+                    SetStatus(Lang.T("No monitor found"));
+                    return;
+                }
+            }
+
+            string dir = RecOutDir();
+            try
+            {
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+            }
+            catch (Exception ex)
+            {
+                SetStatus(Lang.F("Recording failed: {0}", ex.Message));
+                return;
+            }
+
+            _recPath = Path.Combine(dir, "Recording_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".mp4");
+            _recMonitorIndex = cboRecMonitor.SelectedIndex < 0 ? 0 : cboRecMonitor.SelectedIndex;
+            _recWindowHandle = SelectedRecWindow();
+            _recOutHeight = SelectedRecHeight();
+            _recFps = SelectedRecFps();
+            _recCursor = chkRecCursor.Checked;
+
+            Rectangle target = RecTargetRect();
+            if (chkRecHideSelf.Checked && Visible)
+            {
+                _recSelfWasVisible = true;
+                _recHideSelfActive = true;
+                Hide();
+            }
+
+            int cd = _cfg.RecCountdown;
+            if (cd <= 0)
+            {
+                BeginVideoCapture();
+                return;
+            }
+            UpdateRecVideoUi();
+            _countdown = new CountdownForm(cd, target, delegate { BeginVideoCapture(); });
+            _countdown.Show();
+            SetStatus(Lang.T("Recording starts in..."));
+        }
+
+        private void BeginVideoCapture()
+        {
+            _countdown = null;
+            if (_recorder2.Running) return;
+            if (!_recorder2.Start(rbRecWindow.Checked ? 1 : 0, _recMonitorIndex, _recWindowHandle,
+                    _recOutHeight, _recFps, _recPath, _recCursor))
+            {
+                SetStatus(Lang.T("Not recording"));
+                RestoreAfterRecording();
+                return;
+            }
+            Log.Info(string.Format("开始录屏: {0} {1}fps 目标={2} 文件={3}",
+                _recOutHeight <= 0 ? "原始分辨率" : _recOutHeight + "p", _recFps,
+                rbRecWindow.Checked ? "窗口" : "屏幕" + (_recMonitorIndex + 1), _recPath));
+            UpdateAllUi();
+            SetStatus(Lang.F("Recording: {0}  |  {1} frames", "00:00:00", 0));
+        }
+
+        private void ToggleVideoPause()
+        {
+            if (!_recorder2.Running) return;
+            if (_recorder2.Paused)
+            {
+                _recorder2.Resume();
+                SetStatus(Lang.T("Recording resumed"));
+            }
+            else
+            {
+                _recorder2.Pause();
+                SetStatus(Lang.T("Recording paused"));
+            }
+            UpdateRecVideoUi();
+        }
+
+        private void StopVideoRecording()
+        {
+            if (!_recorder2.Running) return;
+            _recorder2.Stop();
+            SetStatus(Lang.T("Saving video..."));
+            UpdateRecVideoUi();
+        }
+
+        /// <summary>录制结束后恢复窗口显示(录制时隐藏过才恢复)。</summary>
+        private void RestoreAfterRecording()
+        {
+            if (!_recHideSelfActive) return;
+            _recHideSelfActive = false;
+            if (!_recSelfWasVisible) { _recSelfWasVisible = false; return; }
+            _recSelfWasVisible = false;
+            try
+            {
+                Show();
+                WindowState = FormWindowState.Normal;
+                Activate();
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        /// <summary>刷新录屏页按钮与状态(引擎状态变化/定时器调用)。</summary>
+        private void UpdateRecVideoUi()
+        {
+            if (btnRecStart == null) return;
+            bool running = _recorder2.Running;
+            bool counting = _countdown != null;
+            btnRecStart.Enabled = !running && !counting;
+            btnRecPause.Enabled = running;
+            btnRecStop.Enabled = running;
+            btnRecPause.Text = Lang.T(_recorder2.Paused ? "Resume" : "Pause");
+            btnRecPause.Invalidate();
+            btnRecStop.Invalidate();
+            // 录制中锁定目标与输出设置(避免录到一半换源/换路径)
+            rbRecScreen.Enabled = !running && !counting;
+            rbRecWindow.Enabled = !running && !counting;
+            cboRecRes.Enabled = !running;
+            cboRecFps.Enabled = !running;
+            txtRecDir.Enabled = !running;
+            btnRecBrowse.Enabled = !running;
+            chkRecCursor.Enabled = !running && !counting;
+            chkRecHideSelf.Enabled = !running && !counting;
+            if (!running && !counting) lblRecState.Text = Lang.T("Not recording");
+        }
+
+        /// <summary>录制中定时刷新"已录时长 + 帧数"(挂在 300ms 状态定时器上)。</summary>
+        private void RefreshRecVideoStatus()
+        {
+            if (lblRecState == null || !_recorder2.Running) return;
+            TimeSpan t = TimeSpan.FromSeconds(_recorder2.Seconds);
+            string time = string.Format("{0:00}:{1:00}:{2:00}", (int)t.TotalHours, t.Minutes, t.Seconds);
+            lblRecState.Text = Lang.F(_recorder2.Paused ? "Paused: {0}  |  {1} frames" : "Recording: {0}  |  {1} frames",
+                time, _recorder2.FrameCount);
+            btnRecPause.Text = Lang.T(_recorder2.Paused ? "Resume" : "Pause");
+            if (_trayIcon != null)
+            {
+                try { _trayIcon.Text = Lang.F("Auto Clicker {0}", VersionInfo.Version) + "  ● " + time; } catch (Exception) { }
+            }
+        }
+
+        private void OnVideoRecordingFinished()
+        {
+            RestoreAfterRecording();
+            UpdateAllUi();
+            string err = _recorder2.LastError;
+            string path = _recorder2.OutputPath;
+            if (_trayIcon != null)
+            {
+                try { _trayIcon.Text = Lang.F("Auto Clicker {0}", VersionInfo.Version); } catch (Exception) { }
+            }
+            if (!string.IsNullOrEmpty(err))
+            {
+                Log.Warn("录屏结束(失败): " + err + " 文件=" + path);
+                SetStatus(Lang.F("Recording failed: {0}", err));
+            }
+            else
+            {
+                Log.Info("录屏结束: " + path + " 帧=" + _recorder2.FrameCount);
+                SetStatus(Lang.F("Saved: {0}", path));
+            }
         }
 
         private void BuildLibraryPage(Panel page)
@@ -968,7 +1481,7 @@ namespace AutoClickerTool
             gbSoft.Controls.AddRange(new Control[] { chkLaunchStart, chkLaunchEnd });
             page.Controls.Add(gbSoft);
 
-            page.Controls.Add(Tip("Tip: click the ▶ button on the left of a saved macro to run it immediately; click the name to select it, then rename / copy / delete on the right.\r\nPrograms in the Software control list auto-launch when playback starts or ends.", 12, 392));
+            page.Controls.Add(Tip("Tip: click ▶ to run a macro; select it, then rename / copy / delete on the right.\r\nSoftware control programs auto-launch when playback starts or ends.", 12, 392));
         }
 
         private void BuildHotkeyPage(Panel page)
@@ -1003,8 +1516,8 @@ namespace AutoClickerTool
         private void BuildAdvancedPage(Panel page)
         {
             // ---- 注入方式 ----
-            var gbInject = Grp("Injection method (switch when a game blocks clicking)", 10, 10, 540, 128);
-            gbInject.Controls.Add(Lbl("Injection method:", 15, 30));
+            var gbInject = Grp("Injection method (switch when a game blocks clicking)", 10, 10, 540, 126);
+            gbInject.Controls.Add(Lbl("Injection method:", 15, 32));
             cboMethod = new ClayComboBox();
             cboMethod.Items.AddRange(new object[]
             {
@@ -1015,43 +1528,43 @@ namespace AutoClickerTool
             cboMethod.SelectedIndex = 0;
             // 英文"Injection method:"较长, 输入框右移到 125 留足间隙;
             // 固定宽度(不随窗口拉伸, 否则拉大窗口时会向右生长盖住右侧控件)
-            var methodShell = ClayKit.InputShell(cboMethod, 125, 26, 250);
+            var methodShell = ClayKit.InputShell(cboMethod, 136, 28, 250);
             gbInject.Controls.Add(methodShell);
             // 右侧 "!" 信息按钮: 悬停显示三种注入方式的差异说明(下拉选项文字过长, 选中项显示不全时看这里)
             var btnMethodInfo = new ClayButton
             {
                 Text = "!",
-                Location = new Point(Dpi.X(382), Dpi.X(26)),
+                Location = new Point(Dpi.X(394), Dpi.X(28)),
                 Size = new Size(Dpi.X(24), Dpi.X(26)),
                 BackColor = Clay.CardBg
             };
             _hintTip.SetToolTip(btnMethodInfo, Lang.T(InjectionInfoText));
             gbInject.Controls.Add(btnMethodInfo);
-            chkScanCode = new ClayCheck { Name = "Keyboard uses scan codes (experimental)", Text = Lang.T("Keyboard uses scan codes (experimental)"), Location = new Point(Dpi.X(15), Dpi.X(60)) };
+            chkScanCode = new ClayCheck { Name = "Keyboard uses scan codes (experimental)", Text = Lang.T("Keyboard uses scan codes (experimental)"), Location = new Point(Dpi.X(15), Dpi.X(62)) };
             rbTargetForeground = new ClayRadio { Name = "Foreground window", Text = Lang.T("Foreground window"), Location = new Point(Dpi.X(15), Dpi.X(88)), Checked = true };
-            rbTargetNamed = new ClayRadio { Name = "Window by title:", Text = Lang.T("Window by title:"), Location = new Point(Dpi.X(160), Dpi.X(88)) };
+            rbTargetNamed = new ClayRadio { Name = "Window by title:", Text = Lang.T("Window by title:"), Location = new Point(Dpi.X(176), Dpi.X(88)) };
             txtTargetWindow = new TextBox { BorderStyle = BorderStyle.None };
             // 英文"Window by title:"较长, 输入框右移到 288; 固定宽度, 与右侧抓取按钮保持间隙
-            var targetShell = ClayKit.InputShell(txtTargetWindow, 288, 84, 100);
+            var targetShell = ClayKit.InputShell(txtTargetWindow, 312, 84, 100);
             gbInject.Controls.Add(targetShell);
-            btnGrabWindow = new ClayButton { Name = "Grab window title", Text = Lang.T("Grab window title"), Location = new Point(Dpi.X(392), Dpi.X(84)), Size = new Size(Dpi.X(120), Dpi.X(26)) };
+            btnGrabWindow = new ClayButton { Name = "Grab window title", Text = Lang.T("Grab window title"), Location = new Point(Dpi.X(418), Dpi.X(84)), Size = new Size(Dpi.X(110), Dpi.X(26)) };
             gbInject.Controls.AddRange(new Control[] { chkScanCode, rbTargetForeground, rbTargetNamed, btnGrabWindow });
             page.Controls.Add(gbInject);
 
             // ---- 拟人化(总开关 + 各子项) ----
-            var gbHuman = Grp("Humanization", 10, 148, 540, 132);
-            chkHumanizeEnabled = new ClayCheck { Name = "Enable humanization", Text = Lang.T("Enable humanization"), Location = new Point(Dpi.X(140), Dpi.X(4)), Checked = true, BackColor = Clay.CardBg };
-            chkHumanizeTiming = new ClayCheck { Name = "Randomize interval ±", Text = Lang.T("Randomize interval ±"), Location = new Point(Dpi.X(15), Dpi.X(28)), Checked = true };
+            var gbHuman = Grp("Humanization", 10, 142, 540, 142);
+            chkHumanizeEnabled = new ClayCheck { Name = "Enable humanization", Text = Lang.T("Enable humanization"), Location = new Point(Dpi.X(140), Dpi.X(6)), Checked = true, BackColor = Clay.CardBg };
+            chkHumanizeTiming = new ClayCheck { Name = "Randomize interval ±", Text = Lang.T("Randomize interval ±"), Location = new Point(Dpi.X(15), Dpi.X(32)), Checked = true };
             numTimingPct = new ClayNumericUpDown { Minimum = 0, Maximum = 90, Value = 15, BorderStyle = BorderStyle.None };
-            // 英文"Randomize interval ±"较长, 数值框右移到 195
-            gbHuman.Controls.Add(ClayKit.InputShell(numTimingPct, 195, 24, 55));
-            gbHuman.Controls.Add(Lbl("%", 255, 28));
-            chkHumanizePos = new ClayCheck { Name = "Fixed position jitter ±", Text = Lang.T("Fixed position jitter ±"), Location = new Point(Dpi.X(15), Dpi.X(54)), Checked = true };
+            // 英文"Randomize interval ±"较长, 数值框右移到 195; 两行输入框之间留 4px 间隙(原来贴着)
+            gbHuman.Controls.Add(ClayKit.InputShell(numTimingPct, 195, 28, 55));
+            gbHuman.Controls.Add(Lbl("%", 255, 32));
+            chkHumanizePos = new ClayCheck { Name = "Fixed position jitter ±", Text = Lang.T("Fixed position jitter ±"), Location = new Point(Dpi.X(15), Dpi.X(62)), Checked = true };
             numPosPx = new ClayNumericUpDown { Minimum = 0, Maximum = 20, Value = 2, BorderStyle = BorderStyle.None };
-            gbHuman.Controls.Add(ClayKit.InputShell(numPosPx, 195, 50, 55));
-            gbHuman.Controls.Add(Lbl("pixels", 255, 54));
-            chkHumanizePress = new ClayCheck { Name = "Random press duration (40~180ms, human-like)", Text = Lang.T("Random press duration (40~180ms, human-like)"), Location = new Point(Dpi.X(15), Dpi.X(80)), Checked = true };
-            chkHumanizeTraj = new ClayCheck { Name = "Mouse trajectory (smooth curve instead of teleport)", Text = Lang.T("Mouse trajectory (smooth curve instead of teleport)"), Location = new Point(Dpi.X(15), Dpi.X(106)), Checked = true };
+            gbHuman.Controls.Add(ClayKit.InputShell(numPosPx, 195, 58, 55));
+            gbHuman.Controls.Add(Lbl("pixels", 255, 62));
+            chkHumanizePress = new ClayCheck { Name = "Random press duration (40~180ms, human-like)", Text = Lang.T("Random press duration (40~180ms, human-like)"), Location = new Point(Dpi.X(15), Dpi.X(92)), Checked = true };
+            chkHumanizeTraj = new ClayCheck { Name = "Mouse trajectory (smooth curve instead of teleport)", Text = Lang.T("Mouse trajectory (smooth curve instead of teleport)"), Location = new Point(Dpi.X(15), Dpi.X(118)), Checked = true };
             gbHuman.Controls.AddRange(new Control[] { chkHumanizeEnabled, chkHumanizeTiming, chkHumanizePos, chkHumanizePress, chkHumanizeTraj });
             page.Controls.Add(gbHuman);
 
@@ -1072,9 +1585,9 @@ namespace AutoClickerTool
             page.Controls.Add(gbUi);
 
             // ---- 启动与托盘 ----
-            var gbStartup = Grp("Startup", 10, 378, 540, 56);
-            chkAutoStart = new ClayCheck { Name = "Start with Windows", Text = Lang.T("Start with Windows"), Location = new Point(Dpi.X(15), Dpi.X(30)) };
-            chkSilentStart = new ClayCheck { Name = "Start silently (to tray)", Text = Lang.T("Start silently (to tray)"), Location = new Point(Dpi.X(280), Dpi.X(30)) };
+            var gbStartup = Grp("Startup", 10, 380, 540, 52);
+            chkAutoStart = new ClayCheck { Name = "Start with Windows", Text = Lang.T("Start with Windows"), Location = new Point(Dpi.X(15), Dpi.X(28)) };
+            chkSilentStart = new ClayCheck { Name = "Start silently (to tray)", Text = Lang.T("Start silently (to tray)"), Location = new Point(Dpi.X(280), Dpi.X(28)) };
             gbStartup.Controls.AddRange(new Control[] { chkAutoStart, chkSilentStart });
             page.Controls.Add(gbStartup);
 
@@ -1149,7 +1662,7 @@ namespace AutoClickerTool
             lblKeyVol = new Label { Text = "100%", Location = new Point(Dpi.X(308), Dpi.X(330)), AutoSize = true, ForeColor = Clay.Ink, BackColor = Clay.WindowBg };
             page.Controls.AddRange(new Control[] { lblKeyVolTitle, sldKeyVolume, lblKeyVol });
 
-            page.Controls.Add(Tip("Tip: assign a sound to any key; pressing the key plays the sound, and a newly pressed bound key overrides the currently playing one.\r\nEach scene has its own subfolder under Sounds (create scenes with the \"New scene\" button) and its own set of bindings.\r\nPrefer wav files: mp3 playback may fail on some systems.", 12, 356));
+            page.Controls.Add(Tip("Tip: assign a sound to any key; a newly pressed bound key overrides the playing one.\r\nEach scene has its own folder under Sounds (\"New scene\"); prefer wav over mp3.", 12, 356));
         }
 
         private void WireEvents()
@@ -1285,6 +1798,24 @@ namespace AutoClickerTool
             btnSfxNewScene.Click += delegate { CreateSfxScene(); };
             btnSfxDelScene.Click += delegate { DeleteSfxScene(); };
 
+            // 录制视频(录屏)
+            rbRecScreen.CheckedChanged += delegate { if (!_applying) { UpdateRecTargetUi(); SaveSettings(); } };
+            rbRecWindow.CheckedChanged += delegate { if (!_applying) { UpdateRecTargetUi(); SaveSettings(); } };
+            cboRecMonitor.SelectedIndexChanged += delegate { if (!_applying) { UpdateRecSizeInfo(); SaveSettings(); } };
+            cboRecWindow.SelectedIndexChanged += delegate { if (!_applying) { UpdateRecSizeInfo(); SaveSettings(); } };
+            cboRecRes.SelectedIndexChanged += delegate { if (!_applying) { UpdateRecSizeInfo(); SaveSettings(); } };
+            cboRecFps.SelectedIndexChanged += delegate { if (!_applying) { UpdateRecSizeInfo(); SaveSettings(); } };
+            txtRecDir.TextChanged += delegate { if (!_applying) SaveSettings(); };
+            chkRecHideSelf.CheckedChanged += delegate { if (!_applying) SaveSettings(); };
+            chkRecCursor.CheckedChanged += delegate { if (!_applying) SaveSettings(); };
+            btnRecStart.Click += delegate { StartVideoRecording(); };
+            btnRecPause.Click += delegate { ToggleVideoPause(); };
+            btnRecStop.Click += delegate { StopVideoRecording(); };
+            btnRecBrowse.Click += delegate { BrowseRecDir(); };
+            btnRecFolder.Click += delegate { OpenRecFolder(); };
+            btnRecRefresh.Click += delegate { RefreshRecWindows(); };
+            btnRecGrab.Click += delegate { GrabRecWindow(); };
+
             // 语言 / 主题切换
             cboLanguage.SelectedIndexChanged += delegate
             {
@@ -1416,6 +1947,13 @@ namespace AutoClickerTool
             cboTheme.Items.Clear();
             foreach (var t in Theme.All) cboTheme.Items.Add(Lang.Code == "zh" ? t.NameZh : t.NameEn);
             cboTheme.SelectedIndex = Clamp(sel, 0, Theme.All.Length - 1);
+
+            // 录屏页: 分辨率/显示器下拉含本地化文本, 需按语言重建(坑 7)
+            sel = cboRecRes.SelectedIndex;
+            cboRecRes.Items.Clear();
+            cboRecRes.Items.AddRange(new object[] { Lang.T("Native (source)"), Lang.T("720p (HD)"), Lang.T("1080p (Full HD)"), Lang.T("1440p (2K)") });
+            cboRecRes.SelectedIndex = Clamp(sel < 0 ? 2 : sel, 0, 3);
+            RefreshRecMonitors();
 
             if (_trayOpen != null) _trayOpen.Text = Lang.T("Show main window");
             if (_trayTopmost != null) { _trayTopmost.Text = Lang.T("Topmost"); _trayTopmost.Checked = TopMost; }
@@ -1817,6 +2355,7 @@ namespace AutoClickerTool
             _spammer.Stop();
             _player.Stop();
             if (_recorder.Recording) _recorder.Stop();
+            _recorder2.Stop(); // 录屏也归「全部停止」(F12 可在窗口隐藏时停录)
             // 立即把仍处于"注入后未抬起"的按键补发抬起: 引擎线程收尾也会做, 这里保证按 F12/点停止后不留卡键
             InputSimulator.ReleaseAllKeys();
             Log.Info("停止全部引擎");
@@ -3177,6 +3716,21 @@ namespace AutoClickerTool
                 Anim.Enabled = cfg.AnimationsEnabled;
                 chkAnimations.Checked = cfg.AnimationsEnabled;
 
+                // 录制视频(录屏)
+                rbRecScreen.Checked = cfg.RecTargetMode == 0;
+                rbRecWindow.Checked = cfg.RecTargetMode == 1;
+                cboRecRes.SelectedIndex = RecResIndex(cfg.RecHeight);
+                cboRecFps.SelectedIndex = RecFpsIndex(cfg.RecFps);
+                txtRecDir.Text = string.IsNullOrEmpty(cfg.RecOutDir) ? AppConfig.VideosDir : cfg.RecOutDir;
+                chkRecHideSelf.Checked = cfg.RecHideSelf;
+                chkRecCursor.Checked = cfg.RecCursor;
+                RefreshRecMonitors();
+                cboRecMonitor.SelectedIndex = Clamp(cfg.RecMonitorIndex, 0, Math.Max(0, cboRecMonitor.Items.Count - 1));
+                RefreshRecWindows();
+                SelectRecWindowByTitle(cfg.RecWindowTitle);
+                UpdateRecTargetUi();
+                UpdateRecVideoUi();
+
                 // 宏库页: 软件控制
                 RefreshProgramList();
                 chkLaunchStart.Checked = cfg.LaunchOnStart;
@@ -3277,6 +3831,17 @@ namespace AutoClickerTool
             _cfg.PlayUntilPrimary = _playLimit.UntilPrimary;
             _cfg.LaunchOnStart = chkLaunchStart.Checked;
             _cfg.LaunchOnEnd = chkLaunchEnd.Checked;
+
+            // 录制视频(录屏)
+            _cfg.RecTargetMode = rbRecWindow.Checked ? 1 : 0;
+            _cfg.RecMonitorIndex = cboRecMonitor.SelectedIndex < 0 ? 0 : cboRecMonitor.SelectedIndex;
+            int recWin = cboRecWindow.SelectedIndex;
+            _cfg.RecWindowTitle = (recWin >= 0 && recWin < _recWindows.Count) ? _recWindows[recWin].Title : "";
+            _cfg.RecHeight = SelectedRecHeight();
+            _cfg.RecFps = SelectedRecFps();
+            _cfg.RecOutDir = txtRecDir.Text == null ? "" : txtRecDir.Text.Trim();
+            _cfg.RecHideSelf = chkRecHideSelf.Checked;
+            _cfg.RecCursor = chkRecCursor.Checked;
             _cfg.Topmost = TopMost;
             _cfg.AutoStart = chkAutoStart.Checked;
             _cfg.StartMinimized = chkSilentStart.Checked;
@@ -3402,6 +3967,7 @@ namespace AutoClickerTool
             UpdateKeyboardUi();
             UpdateRecordUi();
             UpdatePlayUi();
+            UpdateRecVideoUi();
             UpdateHotkeyUi();
             UpdateStatusDot();
         }
@@ -3491,6 +4057,8 @@ namespace AutoClickerTool
             _clicker.WaitExit(500);
             _spammer.WaitExit(500);
             _player.WaitExit(500);
+            // 录屏线程必须收尾: 没跑完 Finalize 的 mp4 没有索引, 不可播放
+            _recorder2.WaitExit(2500);
             // 引擎线程已收尾: 退出前再兜底释放一次, 保证任何残留按键都不会留在系统里(进程退出不会自动松开)
             InputSimulator.ReleaseAllKeys();
             _recorder.Dispose();
@@ -3523,6 +4091,7 @@ namespace AutoClickerTool
             try { _spammer.Stop(); } catch (Exception) { }
             try { _player.Stop(); } catch (Exception) { }
             try { if (_recorder.Recording) _recorder.Stop(); } catch (Exception) { }
+            try { _recorder2.Stop(); } catch (Exception) { }                 // 崩溃兜底: 让录屏线程 Finalize mp4
             try { InputSimulator.ReleaseAllKeys(); } catch (Exception) { } // 崩溃兜底: 注入的键不会在系统里卡住
         }
     }

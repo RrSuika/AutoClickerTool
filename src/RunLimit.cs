@@ -64,35 +64,36 @@ namespace AutoClickerTool
             _numCount.Minimum = 0;
             _numCount.Maximum = 100000000;
             _numCount.Value = 0;
-            Controls.Add(ClayKit.InputShell(_numCount, 112, 0, 58));
+            Controls.Add(ClayKit.InputShell(_numCount, 124, 0, 58));
 
             _rbInfinite.Name = "Infinite loop";
             _rbInfinite.Text = Lang.T("Infinite loop");
             _rbInfinite.Location = new Point(Dpi.X(190), Dpi.X(0));
             Controls.Add(_rbInfinite);
 
-            // 第 2 行: 运行时长 时/分/秒
+            // 第 2 行: 运行时长 时/分/秒(行距 32 = 控件高 26 + 6px 间隙;
+            // 单位标签与下一个输入框之间必须留 ≥4px, 否则框会互相压边——见手册坑 32 之后的新坑 33)
             _rbDuration.Name = "Run for:";
             _rbDuration.Text = Lang.T("Run for:");
-            _rbDuration.Location = new Point(Dpi.X(2), Dpi.X(24));
+            _rbDuration.Location = new Point(Dpi.X(2), Dpi.X(32));
             Controls.Add(_rbDuration);
 
             SetupNum(_numHours, 0, 999, 0);
-            Controls.Add(ClayKit.InputShell(_numHours, 100, 24, 54));
-            Controls.Add(MkLabel("h", 158, 28));
+            Controls.Add(ClayKit.InputShell(_numHours, 100, 32, 54));
+            Controls.Add(MkLabel("h", 158, 36));
             SetupNum(_numMins, 0, 59, 0);
-            Controls.Add(ClayKit.InputShell(_numMins, 172, 24, 54));
-            Controls.Add(MkLabel("m", 230, 28));
+            Controls.Add(ClayKit.InputShell(_numMins, 182, 32, 54));
+            Controls.Add(MkLabel("m", 240, 36));
             SetupNum(_numSecs, 0, 59, 0);
-            Controls.Add(ClayKit.InputShell(_numSecs, 244, 24, 54));
-            Controls.Add(MkLabel("s", 302, 28));
+            Controls.Add(ClayKit.InputShell(_numSecs, 264, 32, 54));
+            Controls.Add(MkLabel("s", 322, 36));
 
             // 第 3 行: 截止时刻(与时长双向同步)
-            Controls.Add(MkLabel("Until:", 2, 54));
+            Controls.Add(MkLabel("Until:", 2, 68));
             _txtUntil.BorderStyle = BorderStyle.None;
             _txtUntil.MaxLength = 19;
             _txtUntil.Text = DateTime.Now.AddSeconds(DefaultDurationSeconds).ToString(UntilFormat, CultureInfo.InvariantCulture);
-            Controls.Add(ClayKit.InputShell(_txtUntil, 50, 50, 210));
+            Controls.Add(ClayKit.InputShell(_txtUntil, 58, 64, 210));
         }
 
         private static Label MkLabel(string text, int x, int y)

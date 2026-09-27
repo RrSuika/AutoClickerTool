@@ -97,10 +97,56 @@ namespace AutoClickerTool
             d["Loop playback hotkey: {0}"] = "回放开关: 按 {0} 开始/停止回放";
             d["Tip: recording captures mouse moves, clicks, wheel and keys; bound hotkeys and injected clicks are excluded.\r\nAfter stopping you can edit events: double-click a row or use the buttons on the right."]
                 = "提示: 录制包含鼠标移动与按键, 已绑定的热键与程序自身注入的点击不会被录进宏。\r\n停止后可编辑事件: 双击某行改延迟, 或用右侧按钮添加/删除。";
-            d["Tip: recording captures mouse moves, clicks, wheel and keys; bound hotkeys and injected clicks are excluded."]
-                = "提示: 录制包含鼠标移动与按键; 已绑定的热键与程序自身注入的点击不会被录进宏。";
+            d["Tip: records mouse moves, clicks, wheel and keys; bound hotkeys are skipped."]
+                = "提示: 录制鼠标移动、点击、滚轮与按键; 已绑定的热键不会被录进宏。";
             d["Tip: recording captures mouse moves, clicks, wheel and keys; bound hotkeys and injected clicks are excluded.\r\nAfter stopping you can edit events with the buttons on the right."]
                 = "提示: 录制包含鼠标移动与按键, 已绑定的热键与程序自身注入的点击不会被录进宏。\r\n停止后可编辑事件: 双击列表某行改延迟, 或用右侧按钮添加/删除。";
+
+            // 录屏(录制视频页)
+            d["Video"] = "录制视频";
+            d["Recording target"] = "录制目标";
+            d["Screen"] = "指定屏幕";
+            d["Window"] = "指定窗口";
+            d["Monitor:"] = "显示器:";
+            d["Window:"] = "窗口:";
+            d["Refresh list"] = "刷新列表";
+            d["Grab foreground window"] = "抓取前台窗口";
+            d["(click refresh to list windows)"] = "(点「刷新列表」枚举窗口)";
+            d["Output"] = "输出设置";
+            d["Resolution:"] = "分辨率:";
+            d["Frame rate:"] = "帧率:";
+            d["Save to:"] = "保存到:";
+            d["Browse..."] = "浏览…";
+            d["Open folder"] = "打开文件夹";
+            d["Native (source)"] = "原始(与源同尺寸)";
+            d["720p (HD)"] = "720p 高清";
+            d["1080p (Full HD)"] = "1080p 全高清";
+            d["1440p (2K)"] = "1440p 2K";
+            d["Hide this window while recording"] = "录制时隐藏本窗口";
+            d["Include mouse cursor"] = "录入鼠标指针";
+            d["Recording control"] = "录制控制";
+            d["Stop and save"] = "停止并保存";
+            d["Pause"] = "暂停";
+            d["Resume"] = "继续";
+            d["Recording starts in..."] = "录制即将开始…";
+            d["Not recording"] = "未在录制";
+            d["Recording: {0}  |  {1} frames"] = "录制中: {0}  |  已录 {1} 帧";
+            d["Paused: {0}  |  {1} frames"] = "已暂停: {0}  |  已录 {1} 帧";
+            d["Saved: {0}"] = "已保存: {0}";
+            d["Recording failed: {0}"] = "录制失败: {0}";
+            d["Recording stopped"] = "录制已结束";
+            d["No window selected. Click \"Refresh list\" and pick one."] = "未选择窗口: 请点「刷新列表」并选择一个窗口。";
+            d["No monitor found"] = "没有找到显示器";
+            d["Tip: saved as MP4 (H.264) - Recording_YYYYMMDD_HHMMSS.mp4 in the folder above.\r\n3-second countdown; pause/resume anytime. High resolution/fps needs a fast PC."] = "提示: 保存为 MP4(H.264), 文件名 Recording_年月日_时分秒.mp4, 位置为上方文件夹。\r\n开始前有 3 秒倒计时, 录制中可暂停/继续; 分辨率与帧率越高越吃性能。";
+            d["Video folder: {0}"] = "视频文件夹: {0}";
+            d["Display {0}: {1}x{2}"] = "显示器 {0}: {1}×{2}";
+            d["(primary)"] = "(主显示器)";
+            d["Recording paused"] = "录制已暂停";
+            d["Recording resumed"] = "已继续录制";
+            d["Saving video..."] = "正在保存视频…";
+            d["Choose the folder where recordings are saved"] = "选择录像保存文件夹";
+            d["Foreground window not found in the list, please pick one manually"] = "前台窗口不在列表里, 请手动选择一个";
+            d["Grabbed window: {0}"] = "已抓取窗口: {0}";
 
             // 按键名
             d["Space"] = "空格 Space";
@@ -204,8 +250,8 @@ namespace AutoClickerTool
             d["Program added: {0}"] = "已添加程序: {0}";
             d["Select a program first"] = "请先选择一个程序";
             d["Launch failed: {0}"] = "启动程序失败: {0}";
-            d["Tip: click the ▶ button on the left of a saved macro to run it immediately; click the name to select it, then rename / copy / delete on the right.\r\nPrograms in the Software control list auto-launch when playback starts or ends."]
-                = "提示: 点击宏名称左侧的 ▶ 立即播放该宏; 点击名称选中后, 可在右侧重命名/创建副本/删除。\r\n软件控制列表中的程序会在回放开始/结束时自动启动。";
+            d["Tip: click ▶ to run a macro; select it, then rename / copy / delete on the right.\r\nSoftware control programs auto-launch when playback starts or ends."]
+                = "提示: 点左侧 ▶ 立即回放该宏; 选中后在右侧重命名/创建副本/删除。\r\n软件控制列表中的程序会在回放开始/结束时自动启动。";
 
             // 事件描述
             d["Move to ({0}, {1})"] = "移动到 ({0}, {1})";
@@ -351,8 +397,8 @@ namespace AutoClickerTool
             d["Scene already exists"] = "场景已存在";
             d["Sound scene created: {0}"] = "音效场景已创建: {0}";
             d["Sound scene switched to {0}"] = "音效场景已切换到: {0}";
-            d["Tip: assign a sound to any key; pressing the key plays the sound, and a newly pressed bound key overrides the currently playing one.\r\nEach scene has its own subfolder under Sounds (create scenes with the \"New scene\" button) and its own set of bindings.\r\nPrefer wav files: mp3 playback may fail on some systems."]
-                = "提示: 给任意按键绑定音效, 按下即播放, 新按下的绑定键会打断正在播放的音效。\r\n每个场景是 Sounds 下的一个子文件夹(用「新建场景」按钮创建), 并拥有自己的一套绑定。\r\n优先使用 wav 音效文件, mp3 在部分系统上可能无法播放。";
+            d["Tip: assign a sound to any key; a newly pressed bound key overrides the playing one.\r\nEach scene has its own folder under Sounds (\"New scene\"); prefer wav over mp3."]
+                = "提示: 给任意按键绑定音效, 按下即播放, 新按下的绑定键会打断正在播放的音效。\r\n每个场景是 Sounds 下的子文件夹(用「新建场景」创建); 建议优先使用 wav 格式。";
             d["Delete scene"] = "删除场景";
             d["Default scene cannot be deleted"] = "默认场景不能删除";
             d["Delete scene \"{0}\"?\r\nIts folder and all sound files inside will be moved to the Recycle Bin."] = "确定删除场景 \"{0}\"？\r\n该场景的文件夹与里面的音效文件将被移入回收站。";

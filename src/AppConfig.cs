@@ -78,6 +78,17 @@ namespace AutoClickerTool
         public int PlayMinutes = 0;          // (旧字段, 仅用于迁移) 运行分钟数
         public string PlayUntilTime = "";    // (旧字段, 仅用于迁移) 运行到系统时刻 "HH:mm"
 
+        // ---- 录屏(录制视频页) ----
+        public int RecTargetMode = 0;        // 0 = 指定屏幕, 1 = 指定窗口
+        public int RecMonitorIndex = 0;      // 显示器下拉框下标(按 Left 排序)
+        public string RecWindowTitle = "";   // 指定窗口的标题(用标题匹配, 句柄重启后会变)
+        public int RecHeight = 1080;         // 输出高度: 0 = 与源一致, 否则 720/1080/1440
+        public int RecFps = 30;              // 帧率
+        public string RecOutDir = "";        // 输出文件夹(空 = exe 同目录 Videos)
+        public bool RecHideSelf = true;      // 录制时隐藏本程序窗口(录全屏时不把自己录进去)
+        public bool RecCursor = true;        // 把鼠标指针录进视频
+        public int RecCountdown = 3;         // 开始录制前的倒计时秒数(0 = 不倒计时)
+
         // ---- 软件控制(宏库页) ----
         public List<string> LaunchPrograms = new List<string>();
         public bool LaunchOnStart = false;  // 回放开始时自动启动程序
@@ -144,6 +155,12 @@ namespace AutoClickerTool
             get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Sounds"); }
         }
 
+        /// <summary>录屏输出目录(默认 exe 同目录 Videos; 用户在录屏页可改)。</summary>
+        public static string VideosDir
+        {
+            get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Videos"); }
+        }
+
         /// <summary>启动时确保数据目录存在(宏/音效)。</summary>
         public static void EnsureDataDirs()
         {
@@ -151,6 +168,7 @@ namespace AutoClickerTool
             {
                 Directory.CreateDirectory(MacrosDir);
                 Directory.CreateDirectory(SoundsDir);
+                Directory.CreateDirectory(VideosDir);
             }
             catch (Exception)
             {
@@ -326,6 +344,23 @@ namespace AutoClickerTool
                     else Log.Warn("已丢弃白名单外的自动启动程序: " + p);
                 }
                 cfg.LaunchPrograms = keep;
+            }
+            // 录屏: 数值收敛到合法范围; 输出目录必须是已存在的绝对路径(否则回退默认 Videos)
+            if (cfg.RecFps != 15 && cfg.RecFps != 24 && cfg.RecFps != 30 && cfg.RecFps != 60) cfg.RecFps = 30;
+            if (cfg.RecHeight != 0 && cfg.RecHeight != 720 && cfg.RecHeight != 1080 && cfg.RecHeight != 1440) cfg.RecHeight = 1080;
+            if (cfg.RecTargetMode != 0 && cfg.RecTargetMode != 1) cfg.RecTargetMode = 0;
+            if (cfg.RecMonitorIndex < 0) cfg.RecMonitorIndex = 0;
+            if (cfg.RecCountdown < 0 || cfg.RecCountdown > 10) cfg.RecCountdown = 3;
+            if (!string.IsNullOrEmpty(cfg.RecOutDir))
+            {
+                bool ok = false;
+                try { ok = Path.IsPathRooted(cfg.RecOutDir) && Directory.Exists(cfg.RecOutDir); }
+                catch (Exception) { ok = false; }
+                if (!ok)
+                {
+                    Log.Warn("录屏输出目录不可用, 已回退默认目录: " + cfg.RecOutDir);
+                    cfg.RecOutDir = "";
+                }
             }
             SanitizeSfxDict(cfg.SfxBindings);
             SanitizeSfxDict(cfg.SfxComboBindings);
