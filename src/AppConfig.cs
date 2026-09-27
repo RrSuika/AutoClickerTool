@@ -88,6 +88,8 @@ namespace AutoClickerTool
         public bool RecHideSelf = true;      // 录制时隐藏本程序窗口(录全屏时不把自己录进去)
         public bool RecCursor = true;        // 把鼠标指针录进视频
         public int RecCountdown = 3;         // 开始录制前的倒计时秒数(0 = 不倒计时)
+        public int RecHudX = int.MinValue;   // 录制悬浮小条的位置(int.MinValue = 没保存过, 用默认右上角)
+        public int RecHudY = int.MinValue;
 
         // ---- 软件控制(宏库页) ----
         public List<string> LaunchPrograms = new List<string>();
@@ -351,6 +353,8 @@ namespace AutoClickerTool
             if (cfg.RecTargetMode != 0 && cfg.RecTargetMode != 1) cfg.RecTargetMode = 0;
             if (cfg.RecMonitorIndex < 0) cfg.RecMonitorIndex = 0;
             if (cfg.RecCountdown < 0 || cfg.RecCountdown > 10) cfg.RecCountdown = 3;
+            if (cfg.RecHudX < -100000 || cfg.RecHudX > 100000) cfg.RecHudX = int.MinValue;
+            if (cfg.RecHudY < -100000 || cfg.RecHudY > 100000) cfg.RecHudY = int.MinValue;
             if (!string.IsNullOrEmpty(cfg.RecOutDir))
             {
                 bool ok = false;

@@ -178,6 +178,7 @@ namespace AutoClickerTool
         private readonly List<ScreenRecorder.MonitorEntry> _monitors = new List<ScreenRecorder.MonitorEntry>();
         private readonly List<ScreenRecorder.WindowEntry> _recWindows = new List<ScreenRecorder.WindowEntry>();
         private CountdownForm _countdown;
+        private RecordingHud _hud;          // 录制中的悬浮小条(时长 + 暂停/停止)
         private bool _recHideSelfActive;   // 录制期间本窗口已被隐藏(停止后要恢复)
 
         private bool _pinHot;                // 标题栏「窗口置顶」图钉是否悬停(非客户区自绘)
@@ -960,7 +961,7 @@ namespace AutoClickerTool
             gbCtl.Controls.Add(lblRecState);
             page.Controls.Add(gbCtl);
 
-            page.Controls.Add(Tip("Tip: saved as MP4 (H.264) - Recording_YYYYMMDD_HHMMSS.mp4 in the folder above.\r\n3-second countdown; pause/resume anytime. High resolution/fps needs a fast PC.", 12, 380));
+            page.Controls.Add(Tip("Tip: saved as MP4 in the folder above; a draggable bar shows time, pause and stop.\r\n3-second countdown before capture; the bar is never recorded into the video.", 12, 380));
         }
 
         /// <summary>录屏输出目录(界面里为空则用默认 Videos)。</summary>
@@ -1246,12 +1247,14 @@ namespace AutoClickerTool
             }
 
             int cd = _cfg.RecCountdown;
+            // 悬浮小条: 录制期间主窗口收起后靠它看时长/暂停/停止(拖动位置记进配置, 且不会被录进视频)
+            ShowRecordingHud(target, cd);
+            UpdateRecVideoUi();
             if (cd <= 0)
             {
                 BeginVideoCapture();
                 return;
             }
-            UpdateRecVideoUi();
             _countdown = new CountdownForm(cd, target, delegate { BeginVideoCapture(); });
             _countdown.Show();
             SetStatus(Lang.T("Recording starts in..."));
@@ -1265,9 +1268,11 @@ namespace AutoClickerTool
                     _recOutHeight, _recFps, _recPath, _recCursor))
             {
                 SetStatus(Lang.T("Not recording"));
+                CloseRecordingHud();
                 RestoreAfterRecording();
                 return;
             }
+            if (_hud != null) _hud.ShowForRecording();
             Log.Info(string.Format("开始录屏: {0} {1}fps 目标={2} 文件={3}",
                 _recOutHeight <= 0 ? "原始分辨率" : _recOutHeight + "p", _recFps,
                 rbRecWindow.Checked ? "窗口" : "屏幕" + (_recMonitorIndex + 1), _recPath));
@@ -1289,6 +1294,79 @@ namespace AutoClickerTool
                 SetStatus(Lang.T("Recording paused"));
             }
             UpdateRecVideoUi();
+        }
+
+        /// <summary>创建并显示录制悬浮小条(位置优先用上次保存的, 否则放在录制目标右上角)。</summary>
+        private void ShowRecordingHud(Rectangle target, int countdownSeconds)
+        {
+            CloseRecordingHud();
+            try
+            {
+                var hud = new RecordingHud(_recorder2);
+                hud.StartNow += delegate { SkipVideoCountdown(); };
+                hud.PauseToggle += delegate { ToggleVideoPause(); };
+                hud.StopSave += delegate { StopVideoRecording(); };
+                hud.CancelCountdown += delegate { CancelVideoRecording(); };
+                if (_cfg.RecHudX != int.MinValue && _cfg.RecHudY != int.MinValue) hud.PlaceAt(_cfg.RecHudX, _cfg.RecHudY);
+                else hud.PlaceDefault(target);
+                _hud = hud;
+                if (countdownSeconds > 0) hud.ShowForCountdown(countdownSeconds);
+                else hud.ShowForRecording();
+                hud.Show();
+            }
+            catch (Exception ex)
+            {
+                _hud = null;
+                Log.Warn("录制小条创建失败: " + ex.Message);
+            }
+        }
+
+        /// <summary>关闭小条并把拖动后的位置记进配置。</summary>
+        private void CloseRecordingHud()
+        {
+            if (_hud == null) return;
+            RecordingHud hud = _hud;
+            _hud = null;
+            try
+            {
+                if (hud.WasMoved && _cfg != null)
+                {
+                    _cfg.RecHudX = hud.Left;
+                    _cfg.RecHudY = hud.Top;
+                    SaveSettings();
+                }
+                hud.Hide();
+                hud.Close();
+                hud.Dispose();
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        /// <summary>倒计时期间点「立即开始」: 关掉大倒计时立刻抓帧。</summary>
+        private void SkipVideoCountdown()
+        {
+            if (_countdown != null)
+            {
+                _countdown.CancelCountdown();
+                _countdown = null;
+            }
+            BeginVideoCapture();
+        }
+
+        /// <summary>倒计时期间点「取消」: 什么都不录, 恢复主窗口。</summary>
+        private void CancelVideoRecording()
+        {
+            if (_countdown != null)
+            {
+                _countdown.CancelCountdown();
+                _countdown = null;
+            }
+            CloseRecordingHud();
+            RestoreAfterRecording();
+            UpdateAllUi();
+            SetStatus(Lang.T("Recording cancelled"));
         }
 
         private void StopVideoRecording()
@@ -1358,6 +1436,7 @@ namespace AutoClickerTool
 
         private void OnVideoRecordingFinished()
         {
+            CloseRecordingHud();
             RestoreAfterRecording();
             UpdateAllUi();
             string err = _recorder2.LastError;
@@ -1962,6 +2041,7 @@ namespace AutoClickerTool
 
             // 「点击按键」按钮文案(按钮 Name 为空, 需手动刷新)
             UpdateSpamKeyButtonText();
+            if (_hud != null) _hud.ApplyLang(); // 录制小条的按钮文案也是手动维护的
 
             UpdateAllUi();
             RefreshEventList(false);
@@ -4092,6 +4172,7 @@ namespace AutoClickerTool
             try { _player.Stop(); } catch (Exception) { }
             try { if (_recorder.Recording) _recorder.Stop(); } catch (Exception) { }
             try { _recorder2.Stop(); } catch (Exception) { }                 // 崩溃兜底: 让录屏线程 Finalize mp4
+            try { CloseRecordingHud(); } catch (Exception) { }
             try { InputSimulator.ReleaseAllKeys(); } catch (Exception) { } // 崩溃兜底: 注入的键不会在系统里卡住
         }
     }

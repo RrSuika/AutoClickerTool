@@ -100,6 +100,15 @@ namespace AutoClickerTool
             Finish();
         }
 
+        /// <summary>取消倒计时: 关闭窗口但不触发 onDone(不开始录制)。</summary>
+        public void CancelCountdown()
+        {
+            if (_done) return;
+            _done = true;
+            _timer.Stop();
+            Close();
+        }
+
         private void Finish()
         {
             if (_done) return;

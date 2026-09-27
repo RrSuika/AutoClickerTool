@@ -43,6 +43,7 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 | [MediaFoundation.cs](../src/MediaFoundation.cs) | **MP4/H.264 编码（零依赖）**：Media Foundation 的 `MFStartup`/`MFCreateSinkWriterFromURL` 等 P/Invoke + `IMFAttributes/IMFMediaType/IMFSample/IMFMediaBuffer/IMFSinkWriter` COM 接口 + `Mp4Writer`（每帧拷进复用缓冲、优先硬件编码器、失败退回软件）。**接口必须平铺基接口方法**（见坑 33） |
 | [ScreenRecorder.cs](../src/ScreenRecorder.cs) | **录屏引擎**：显示器/窗口枚举（`GetMonitors`/`GetWindows`）、GDI 抓帧（屏幕 `BitBlt/StretchBlt`、窗口 `PrintWindow` 失败退回抓屏、光标 `DrawIconEx`）、按目标帧率节拍抓帧（见坑 35）、暂停/继续、`Stop()` 后一定 `Finalize` mp4；`MonitorEntry`/`WindowEntry` 是嵌套类 |
 | [CountdownForm.cs](../src/CountdownForm.cs) | 录制前的 3 秒倒计时浮层：无边框、置顶、`ShowWithoutActivation`（不抢游戏焦点）、`WDA_EXCLUDEFROMCAPTURE`（不会被录进视频），倒计时结束的回调里才真正开始抓帧 |
+| [RecordingHud.cs](../src/RecordingHud.cs) | **录制悬浮小条**(右上角, 可拖动): 红点 + 已录时长 + 「立即开始/暂停/继续」+「停止并保存」。`WM_MOUSEACTIVATE → MA_NOACTIVATE`(点按钮不切走游戏焦点)、`ShowWithoutActivation`、整条拖动(位置存 `RecHudX/RecHudY`)、`WDA_EXCLUDEFROMCAPTURE` 保证不被录进视频(见坑 36) |
 | [HeldKeys.cs](../src/HeldKeys.cs) | **“注入后未抬起”按键集合**（vk → 是否扩展键）：`Add/Remove/Contains/TakeAll`。回放/连按的按住状态必须用它（不能用单值），停止时逐个补发抬起——漏掉一个键就会在系统层面永久卡住（见坑 32） |
 | [VersionInfo.cs](../src/VersionInfo.cs) | **集中版本号**（`Version` 常量）：窗口标题/关于/状态栏/日志/发布脚本共用，改版只改这里 |
 | [Lang.cs](../src/Lang.cs) | 双语字典：以**英文原文为 key**，`Lang.T(key)` 按 `Lang.Code`("zh"/"en") 翻译；控件 `Name` 属性存英文原文，语言切换时 `ApplyLangWalk` 按 Name 递归刷新 |
@@ -129,7 +130,8 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 - **数据流**：`CountdownForm`(3 秒浮层) → `ScreenRecorder.Start(...)` 起后台线程 → `Mp4Writer.Open`(H.264/MP4，硬件编码器优先) → 循环 { `GrabFrame`(抓进自上而下 32bpp DIB section) → `DrawCursor` → `WriteFrame`(时间戳取真实时钟，掉帧时视频时长仍正确) } → `Stop()` → `Finish()`(写 moov 索引，否则文件不可播)
 - **参数**：录制目标（指定屏幕 / 指定窗口）、分辨率（原始 / 720p / 1080p / 1440p，按源比例缩放并取偶数）、帧率（15/24/30/60）、输出目录（默认 exe 同目录 `Videos`）、是否隐藏本窗口、是否录光标、倒计时秒数
 - **码率**：按 0.1 bit/(像素·帧) 估算（1080p30 ≈ 6 Mbps），钳在 2~40 Mbps
-- **配置项**：`RecTargetMode/RecMonitorIndex/RecWindowTitle/RecHeight/RecFps/RecOutDir/RecHideSelf/RecCursor/RecCountdown`（`SanitizeUntrusted` 收敛非法值；窗口按标题匹配，句柄重启后会变）
+- **配置项**：`RecTargetMode/RecMonitorIndex/RecWindowTitle/RecHeight/RecFps/RecOutDir/RecHideSelf/RecCursor/RecCountdown/RecHudX/RecHudY`（`SanitizeUntrusted` 收敛非法值；窗口按标题匹配，句柄重启后会变；`RecHudX/Y` 默认 `int.MinValue` = 没保存过 → 小条放在录制目标右上角）
+- **录制小条**（[RecordingHud.cs](../src/RecordingHud.cs)）：点「开始录制」立刻出现（倒计时阶段按钮是「立即开始/取消」），抓帧开始后变「暂停/继续 + 停止并保存」；主窗口是否隐藏由「录制时隐藏本窗口」决定，**小条始终显示**（它才是录制中的操作面板）
 - **与其它功能的关系**：`StopAll()`(F12) 也会停录屏；`Shutdown` 里 `WaitExit(2500)` 等 mp4 收尾；录制中窗口可隐藏，用 F12 / 托盘停止
 - **实测性能**（本机 1280x720 虚拟屏 + 硬件编码）：720p30 ≈ 30.5fps、720p60 ≈ 58.8fps，逐帧抓取约 17~27ms
 
@@ -199,6 +201,8 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 33. **COM 互操作: 派生接口必须把基接口的方法全部平铺声明, 不能只写自己的新方法**：C# 里写 `interface IMFSample : IMFAttributes` 只声明新方法时, 运行时会把新方法派发到 **slot 0/1/2…**（也就是基接口的方法上）, 而不是基接口之后的槽位。实测症状极具迷惑性: `AddBuffer`(应为 slot 39) 调到 `GetItem` 返回 `MF_E_ATTRIBUTENOTFOUND(0xC00D36E6)`, `SetSampleTime`(应为 33) 调到 `Compare` 直接把时间戳当指针解引用 → **进程 0xC0000005 崩溃**。修法: 每个派生接口都从 IMFAttributes 的 30 个方法开始**完整平铺**（用不到的方法写 `[PreserveSig] int _A00();` 占位即可, 参数无所谓, 只要不调用）。另外 GUID 常量**不能是 `static readonly`**——`ref` 传参会编译报 CS0199。
 34. **Media Foundation 的 RGB32 输入: `MF_MT_DEFAULT_STRIDE` 用正值配自上而下位图**：`CreateDIBSection` 用负 biHeight 得到自上而下的缓冲, 此时 `MF_MT_DEFAULT_STRIDE` 必须给 **+width*4**; 给负值（按某些文档的说法）录出来的视频**上下颠倒**。这是实测结论（`mftest` 自检脚本录「上半红/下半蓝」窗口, 再用系统缩略图取色验证）, 与文档描述相反时以实测为准。改这里务必重跑自检。
 35. **录屏要按帧率跑满, 三个地方都不能省**：① 抓帧节拍不能只用 `Thread.Sleep`——默认 15.6ms 粒度 + 用 `Thread.Sleep(0)` 收尾会让出整个调度时隙, 实测把 30fps 拖成 24fps; 正确做法是 `timeBeginPeriod(1)` + 粗睡到剩 2ms + `Thread.SpinWait` 忙等收尾。② 计时起点必须在**编码器初始化之后** `clock.Restart()`, 否则第一帧时间戳是几百毫秒, 视频开头会多一段静止画面。③ 停止时一定要 `Finalize`（写 moov 索引）, 否则 mp4 直接不可播; `Shutdown` 里因此有 `_recorder2.WaitExit(2500)`。实测(1280x720 虚拟屏): 720p30 → 30.5fps, 720p60 → 58.8fps, 逐帧 17~27ms。
+
+36. **录制悬浮小条的三条硬要求**：① **不能被录进视频**——`SetWindowDisplayAffinity(Handle, WDA_EXCLUDEFROMCAPTURE)`(Win10 2004+), 失败退回 `WDA_MONITOR`(录制里显示黑块)并写日志; 实测(绿幕窗口 + 小条覆盖其上 + 录整屏 + 缩略图取色)确认为「完全不可见」。② **不能抢焦点**——`ShowWithoutActivation` + `WM_MOUSEACTIVATE` 返回 `MA_NOACTIVATE`, 否则点一下小条就把游戏切到后台。③ **拖动不能用 `WM_NCHITTEST → HTCAPTION`**（卡片是子控件, 命中去不到窗体）, 改成在窗体/卡片/标签上挂 MouseDown/Move/Up + `Capture = true` 手动拖动, 松手时 `ClampToScreen` 并记进配置。注意小条的 `ScreenRecorder` 引用只用来读时长/暂停状态(每 200ms 轮询), 状态机仍在 MainForm 里。
 
 ## 7. 验证流程
 
