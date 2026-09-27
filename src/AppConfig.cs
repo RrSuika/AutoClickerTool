@@ -38,6 +38,10 @@ namespace AutoClickerTool
         public string PlayHotkey = "F8";
         public string KeyboardHotkey = "F9";
         public string StopAllHotkey = "F12";
+        // 录屏热键(F10 开始/停止开关, F11 暂停/继续, Ctrl+F12 只停录屏并保存)
+        public string RecStartHotkey = "F10";
+        public string RecPauseHotkey = "F11";
+        public string RecStopHotkey = "Ctrl+F12";
 
         // ---- 鼠标连点 ----
         public int ClickIntervalMs = 100;

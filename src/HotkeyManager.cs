@@ -10,7 +10,11 @@ namespace AutoClickerTool
         Record = 1,    // 录制开关
         Play = 2,      // 回放开关
         Keyboard = 3,  // 键盘连按开关
-        StopAll = 4    // 全部停止
+        StopAll = 4,   // 全部停止
+        // 录屏(录制视频页): 三个动作的默认键见 HotkeyManager.Default
+        RecStart = 5,  // 开始录制 / 录制中再按 = 停止并保存(开关)
+        RecPause = 6,  // 暂停 / 继续
+        RecStop = 7    // 停止并保存(只停录屏, 不动其它引擎)
     }
 
     /// <summary>
@@ -321,6 +325,9 @@ namespace AutoClickerTool
                 case HotkeyAction.Record: return Hotkey.Parse("F7");
                 case HotkeyAction.Play: return Hotkey.Parse("F8");
                 case HotkeyAction.Keyboard: return Hotkey.Parse("F9");
+                case HotkeyAction.RecStart: return Hotkey.Parse("F10");
+                case HotkeyAction.RecPause: return Hotkey.Parse("F11");
+                case HotkeyAction.RecStop: return Hotkey.Parse("Ctrl+F12");
                 default: return Hotkey.Parse("F12");
             }
         }

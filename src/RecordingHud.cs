@@ -32,6 +32,9 @@ namespace AutoClickerTool
         private Point _dragMouse;
         private Point _dragWindow;
         private bool _moved;
+        private string _hkStart = "";   // 按钮上的热键提示(MainForm 设置, 语言切换时同步)
+        private string _hkPause = "";
+        private string _hkStop = "";
 
         /// <summary>倒计时期间点「立即开始」(跳过剩余秒数)。</summary>
         public event Action StartNow;
@@ -52,7 +55,7 @@ namespace AutoClickerTool
             AutoScaleMode = AutoScaleMode.None;
             BackColor = Clay.WindowBg;
             Font = new Font("Microsoft YaHei UI", 9F);
-            int w = Dpi.X(312);
+            int w = Dpi.X(382);
             int h = Dpi.X(50);
             ClientSize = new Size(w, h);
 
@@ -75,25 +78,25 @@ namespace AutoClickerTool
             {
                 Text = "00:00:00",
                 Location = new Point(Dpi.X(34), Dpi.X(9)),
-                Size = new Size(Dpi.X(74), Dpi.X(18)),
+                Size = new Size(Dpi.X(64), Dpi.X(18)),
                 TextAlign = ContentAlignment.MiddleLeft,
                 ForeColor = Clay.Ink,
                 BackColor = Clay.CardBg,
-                Font = new Font("Consolas", 10F, FontStyle.Bold)
+                Font = new Font("Consolas", 9F, FontStyle.Bold)
             };
             _btnToggle = new ClayButton
             {
                 Name = "", // 文案自己维护(会随状态变), 不能让 ApplyLangWalk 覆盖
                 Text = Lang.T("Pause"),
-                Location = new Point(Dpi.X(112), Dpi.X(7)),
-                Size = new Size(Dpi.X(72), Dpi.X(24))
+                Location = new Point(Dpi.X(104), Dpi.X(7)),
+                Size = new Size(Dpi.X(96), Dpi.X(24))
             };
             _btnStop = new ClayButton
             {
                 Name = "",
                 Text = Lang.T("Stop and save"),
-                Location = new Point(Dpi.X(192), Dpi.X(7)),
-                Size = new Size(Dpi.X(96), Dpi.X(24)),
+                Location = new Point(Dpi.X(208), Dpi.X(7)),
+                Size = new Size(Dpi.X(150), Dpi.X(24)),
                 Danger = true
             };
             _card.Controls.AddRange(new Control[] { _lblDot, _lblTime, _btnToggle, _btnStop });
@@ -164,11 +167,30 @@ namespace AutoClickerTool
             _timer.Start();
         }
 
-        /// <summary>语言切换/初始状态下的按钮文案。</summary>
+        /// <summary>按钮上的热键提示(录制页改绑热键后由 MainForm 同步过来)。</summary>
+        public void SetHotkeyTexts(string start, string pause, string stop)
+        {
+            _hkStart = start == null ? "" : start;
+            _hkPause = pause == null ? "" : pause;
+            _hkStop = stop == null ? "" : stop;
+            ApplyLang();
+        }
+
+        private static string WithHk(string label, string hk)
+        {
+            return string.IsNullOrEmpty(hk) ? label : label + " (" + hk + ")";
+        }
+
+        /// <summary>语言切换/初始状态下的按钮文案(带热键提示)。</summary>
         public void ApplyLang()
         {
-            _btnToggle.Text = _counting ? Lang.T("Start now") : Lang.T(_rec != null && _rec.Paused ? "Resume" : "Pause");
-            _btnStop.Text = _counting ? Lang.T("Cancel") : Lang.T("Stop and save");
+            bool paused = _rec != null && _rec.Paused;
+            _btnToggle.Text = _counting
+                ? WithHk(Lang.T("Start now"), _hkStart)
+                : WithHk(Lang.T(paused ? "Resume" : "Pause"), _hkPause);
+            _btnStop.Text = _counting
+                ? Lang.T("Cancel")
+                : WithHk(Lang.T("Stop and save"), _hkStop);
             _btnToggle.Invalidate();
             _btnStop.Invalidate();
         }

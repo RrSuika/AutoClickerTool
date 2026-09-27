@@ -271,6 +271,10 @@ namespace AutoClickerTool
             _hotkeys.SetCallback(HotkeyAction.Play, () => Ui(() => TogglePlay()));
             _hotkeys.SetCallback(HotkeyAction.Keyboard, () => Ui(() => ToggleKeyboard()));
             _hotkeys.SetCallback(HotkeyAction.StopAll, () => Ui(() => StopAll()));
+            // 录屏热键: F10 开始 / 录制中再按 = 停止并保存(开关), F11 暂停/继续, Ctrl+F12 只停录屏并保存
+            _hotkeys.SetCallback(HotkeyAction.RecStart, () => Ui(() => ToggleVideoByHotkey()));
+            _hotkeys.SetCallback(HotkeyAction.RecPause, () => Ui(() => PauseVideoByHotkey()));
+            _hotkeys.SetCallback(HotkeyAction.RecStop, () => Ui(() => StopVideoRecording()));
 
             ApplyConfigToUi(_cfg);
             BuildTray();
@@ -944,15 +948,17 @@ namespace AutoClickerTool
 
             // 卡片 3: 录制控制(开始 / 暂停 / 停止并保存)
             var gbCtl = Grp("Recording control", 10, 266, 540, 106);
-            btnRecStart = new ClayButton { Name = "", Text = Lang.T("Start recording"), Location = new Point(Dpi.X(15), Dpi.X(30)), Size = new Size(Dpi.X(130), Dpi.X(34)), Accent = true };
-            btnRecPause = new ClayButton { Name = "", Text = Lang.T("Pause"), Location = new Point(Dpi.X(155), Dpi.X(30)), Size = new Size(Dpi.X(100), Dpi.X(34)) };
-            btnRecStop = new ClayButton { Name = "", Text = Lang.T("Stop and save"), Location = new Point(Dpi.X(265), Dpi.X(30)), Size = new Size(Dpi.X(130), Dpi.X(34)), Danger = true };
-            lblRecSize = new Label { Location = new Point(Dpi.X(408), Dpi.X(39)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.CardBg };
+            // 三个按钮的文案在 UpdateRecVideoButtonText() 里统一维护(带热键提示, 如「开始录制 (F10)」)
+            btnRecStart = new ClayButton { Name = "", Text = Lang.T("Start recording"), Location = new Point(Dpi.X(15), Dpi.X(30)), Size = new Size(Dpi.X(150), Dpi.X(34)), Accent = true };
+            btnRecPause = new ClayButton { Name = "", Text = Lang.T("Pause"), Location = new Point(Dpi.X(173), Dpi.X(30)), Size = new Size(Dpi.X(110), Dpi.X(34)) };
+            btnRecStop = new ClayButton { Name = "", Text = Lang.T("Stop and save"), Location = new Point(Dpi.X(291), Dpi.X(30)), Size = new Size(Dpi.X(170), Dpi.X(34)), Danger = true };
+            // 输出尺寸提示挪到第二行右侧(第一行要给「停止并保存 (Ctrl+F12)」留足宽度)
+            lblRecSize = new Label { Location = new Point(Dpi.X(305), Dpi.X(78)), AutoSize = true, ForeColor = Clay.InkSoft, BackColor = Clay.CardBg };
             gbCtl.Controls.AddRange(new Control[] { btnRecStart, btnRecPause, btnRecStop, lblRecSize });
             lblRecState = new Label
             {
                 Location = new Point(Dpi.X(15), Dpi.X(74)),
-                Size = new Size(Dpi.X(515), Dpi.X(18)),
+                Size = new Size(Dpi.X(282), Dpi.X(18)),
                 AutoEllipsis = true,
                 ForeColor = Clay.InkSoft,
                 BackColor = Clay.CardBg,
@@ -961,7 +967,7 @@ namespace AutoClickerTool
             gbCtl.Controls.Add(lblRecState);
             page.Controls.Add(gbCtl);
 
-            page.Controls.Add(Tip("Tip: saved as MP4 in the folder above; a draggable bar shows time, pause and stop.\r\n3-second countdown before capture; the bar is never recorded into the video.", 12, 380));
+            page.Controls.Add(Tip("Tip: saved as MP4 in the folder above; a draggable bar shows time, pause and stop.\r\n3-second countdown; the bar is never captured. Each button shows its hotkey; F12 stops everything.", 12, 380));
         }
 
         /// <summary>录屏输出目录(界面里为空则用默认 Videos)。</summary>
@@ -1309,6 +1315,8 @@ namespace AutoClickerTool
                 hud.CancelCountdown += delegate { CancelVideoRecording(); };
                 if (_cfg.RecHudX != int.MinValue && _cfg.RecHudY != int.MinValue) hud.PlaceAt(_cfg.RecHudX, _cfg.RecHudY);
                 else hud.PlaceDefault(target);
+                hud.SetHotkeyTexts(_hotkeys.Describe(HotkeyAction.RecStart),
+                    _hotkeys.Describe(HotkeyAction.RecPause), _hotkeys.Describe(HotkeyAction.RecStop));
                 _hud = hud;
                 if (countdownSeconds > 0) hud.ShowForCountdown(countdownSeconds);
                 else hud.ShowForRecording();
@@ -1395,6 +1403,34 @@ namespace AutoClickerTool
             }
         }
 
+        /// <summary>录屏热键: 开始录制 / 录制中再按一次 = 停止并保存(倒计时期间 = 立即开始)。</summary>
+        private void ToggleVideoByHotkey()
+        {
+            if (_recorder2.Running) { StopVideoRecording(); return; }
+            if (_countdown != null) { SkipVideoCountdown(); return; }
+            StartVideoRecording();
+        }
+
+        /// <summary>录屏热键: 暂停 / 继续(没在录制时忽略)。</summary>
+        private void PauseVideoByHotkey()
+        {
+            if (_recorder2.Running) ToggleVideoPause();
+        }
+
+        /// <summary>把三个热键提示写到录屏页按钮上(与键盘连按页的「开始连按 (F9)」同一风格)。</summary>
+        private void UpdateRecVideoButtonText()
+        {
+            if (btnRecStart == null) return;
+            btnRecStart.Text = Lang.F("Start recording ({0})", _hotkeys.Describe(HotkeyAction.RecStart));
+            btnRecPause.Text = Lang.F(_recorder2.Paused ? "Resume ({0})" : "Pause ({0})", _hotkeys.Describe(HotkeyAction.RecPause));
+            btnRecStop.Text = Lang.F("Stop and save ({0})", _hotkeys.Describe(HotkeyAction.RecStop));
+            btnRecStart.Invalidate();
+            btnRecPause.Invalidate();
+            btnRecStop.Invalidate();
+            if (_hud != null) _hud.SetHotkeyTexts(_hotkeys.Describe(HotkeyAction.RecStart),
+                _hotkeys.Describe(HotkeyAction.RecPause), _hotkeys.Describe(HotkeyAction.RecStop));
+        }
+
         /// <summary>刷新录屏页按钮与状态(引擎状态变化/定时器调用)。</summary>
         private void UpdateRecVideoUi()
         {
@@ -1404,9 +1440,7 @@ namespace AutoClickerTool
             btnRecStart.Enabled = !running && !counting;
             btnRecPause.Enabled = running;
             btnRecStop.Enabled = running;
-            btnRecPause.Text = Lang.T(_recorder2.Paused ? "Resume" : "Pause");
-            btnRecPause.Invalidate();
-            btnRecStop.Invalidate();
+            UpdateRecVideoButtonText();
             // 录制中锁定目标与输出设置(避免录到一半换源/换路径)
             rbRecScreen.Enabled = !running && !counting;
             rbRecWindow.Enabled = !running && !counting;
@@ -1427,7 +1461,7 @@ namespace AutoClickerTool
             string time = string.Format("{0:00}:{1:00}:{2:00}", (int)t.TotalHours, t.Minutes, t.Seconds);
             lblRecState.Text = Lang.F(_recorder2.Paused ? "Paused: {0}  |  {1} frames" : "Recording: {0}  |  {1} frames",
                 time, _recorder2.FrameCount);
-            btnRecPause.Text = Lang.T(_recorder2.Paused ? "Resume" : "Pause");
+            UpdateRecVideoButtonText();
             if (_trayIcon != null)
             {
                 try { _trayIcon.Text = Lang.F("Auto Clicker {0}", VersionInfo.Version) + "  ● " + time; } catch (Exception) { }
@@ -1565,18 +1599,23 @@ namespace AutoClickerTool
 
         private void BuildHotkeyPage(Panel page)
         {
-            var gb = Grp("Function hotkeys (click a button, then press the new combo)", 10, 10, 540, 200);
-            string[] names = { Lang.T("Clicker toggle"), Lang.T("Recording toggle"), Lang.T("Playback toggle"), Lang.T("Keyboard toggle"), Lang.T("Stop all") };
+            var gb = Grp("Function hotkeys (click a button, then press the new combo)", 10, 10, 540, 262);
+            string[] names =
+            {
+                Lang.T("Clicker toggle"), Lang.T("Recording toggle"), Lang.T("Playback toggle"),
+                Lang.T("Keyboard toggle"), Lang.T("Stop all"),
+                Lang.T("Video recording toggle"), Lang.T("Pause/resume recording"), Lang.T("Stop and save recording")
+            };
             _hkButtons = new Button[names.Length];
             for (int i = 0; i < names.Length; i++)
             {
-                int y = 32 + i * 32;
+                int y = 32 + i * 28; // 行距 28 = 按钮高 24 + 4px 间隙(8 个动作要塞得下且不贴边)
                 gb.Controls.Add(Lbl(names[i], 20, y + 5));
                 // 右锚定: 按钮右缘始终保持在卡片内, 窗口缩放/DPI 变化不会溢出画面
                 var b = new ClayButton
                 {
                     Location = new Point(Dpi.X(200), Dpi.X(y)),
-                    Size = new Size(Dpi.X(170), Dpi.X(26)),
+                    Size = new Size(Dpi.X(170), Dpi.X(24)),
                     Text = "..."
                 };
                 int idx = i;
@@ -1586,10 +1625,10 @@ namespace AutoClickerTool
             }
             page.Controls.Add(gb);
 
-            btnResetHotkeys = new ClayButton { Name = "Reset default hotkeys", Text = Lang.T("Reset default hotkeys"), Location = new Point(Dpi.X(15), Dpi.X(220)), Size = new Size(Dpi.X(145), Dpi.X(30)), BackColor = Clay.WindowBg };
+            btnResetHotkeys = new ClayButton { Name = "Reset default hotkeys", Text = Lang.T("Reset default hotkeys"), Location = new Point(Dpi.X(15), Dpi.X(282)), Size = new Size(Dpi.X(145), Dpi.X(30)), BackColor = Clay.WindowBg };
             page.Controls.Add(btnResetHotkeys);
 
-            page.Controls.Add(Tip("Tip: any key, Ctrl/Alt/Shift/Win combos, multi-key combos (e.g. Ctrl+Q+W), mouse side buttons X1/X2.\r\nChanges are saved to config.json immediately and restored on next launch.\r\nCombos with modifiers or F-keys are recommended; bare letters/numbers conflict with typing.", 12, 262));
+            page.Controls.Add(Tip("Tip: any key, Ctrl/Alt/Shift/Win combos, multi-key combos (e.g. Ctrl+Q+W), mouse side buttons X1/X2.\r\nChanges are saved to config.json immediately and restored on next launch.\r\nCombos with modifiers or F-keys are recommended; bare letters/numbers conflict with typing.", 12, 322));
         }
 
         private void BuildAdvancedPage(Panel page)
@@ -2891,6 +2930,9 @@ namespace AutoClickerTool
                 case HotkeyAction.Record: return Lang.T("Recording toggle");
                 case HotkeyAction.Play: return Lang.T("Playback toggle");
                 case HotkeyAction.Keyboard: return Lang.T("Keyboard toggle");
+                case HotkeyAction.RecStart: return Lang.T("Video recording toggle");
+                case HotkeyAction.RecPause: return Lang.T("Pause/resume recording");
+                case HotkeyAction.RecStop: return Lang.T("Stop and save recording");
                 default: return Lang.T("Stop all");
             }
         }
@@ -2931,7 +2973,7 @@ namespace AutoClickerTool
             if (MessageBox.Show(this, Lang.T("Restore default hotkeys (F6~F9/F12) ?"), Lang.T("Confirm"),
                     MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                 return;
-            for (int i = 0; i < 5; i++)
+            for (int i = 0; i < _hkButtons.Length; i++)
                 _hotkeys.SetBinding((HotkeyAction)i, HotkeyManager.Default((HotkeyAction)i));
             UpdateHotkeyUi();
             UpdateAllUi();
@@ -3754,6 +3796,9 @@ namespace AutoClickerTool
                 ApplyHotkey(HotkeyAction.Play, cfg.PlayHotkey);
                 ApplyHotkey(HotkeyAction.Keyboard, cfg.KeyboardHotkey);
                 ApplyHotkey(HotkeyAction.StopAll, cfg.StopAllHotkey);
+                ApplyHotkey(HotkeyAction.RecStart, cfg.RecStartHotkey);
+                ApplyHotkey(HotkeyAction.RecPause, cfg.RecPauseHotkey);
+                ApplyHotkey(HotkeyAction.RecStop, cfg.RecStopHotkey);
 
                 int method = 0;
                 if (cfg.InjectionMethod == "SendMessage") method = 1;
@@ -3877,6 +3922,12 @@ namespace AutoClickerTool
             if (hk != null) _cfg.KeyboardHotkey = hk.ToString();
             hk = _hotkeys.GetBinding(HotkeyAction.StopAll);
             if (hk != null) _cfg.StopAllHotkey = hk.ToString();
+            hk = _hotkeys.GetBinding(HotkeyAction.RecStart);
+            if (hk != null) _cfg.RecStartHotkey = hk.ToString();
+            hk = _hotkeys.GetBinding(HotkeyAction.RecPause);
+            if (hk != null) _cfg.RecPauseHotkey = hk.ToString();
+            hk = _hotkeys.GetBinding(HotkeyAction.RecStop);
+            if (hk != null) _cfg.RecStopHotkey = hk.ToString();
 
             _cfg.ClickIntervalMs = (int)numInterval.Value;
             _cfg.ClickButton = cboButton.SelectedIndex;
@@ -3981,7 +4032,9 @@ namespace AutoClickerTool
                 + " | " + Lang.T("Record") + " " + _hotkeys.Describe(HotkeyAction.Record)
                 + " | " + Lang.T("Play") + " " + _hotkeys.Describe(HotkeyAction.Play)
                 + " | " + Lang.T("Keyboard") + " " + _hotkeys.Describe(HotkeyAction.Keyboard)
-                + " | " + Lang.T("Stop") + " " + _hotkeys.Describe(HotkeyAction.StopAll);
+                + " | " + Lang.T("Stop") + " " + _hotkeys.Describe(HotkeyAction.StopAll)
+                + " | " + Lang.T("Video") + " " + _hotkeys.Describe(HotkeyAction.RecStart)
+                + " | " + Lang.T("Pause") + " " + _hotkeys.Describe(HotkeyAction.RecPause);
             lblHotkeyHint.Text = text;
             _hintTip.SetToolTip(lblHotkeyHint, text);
             for (int i = 0; i < _hkButtons.Length; i++)

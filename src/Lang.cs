@@ -137,7 +137,7 @@ namespace AutoClickerTool
             d["Recording stopped"] = "录制已结束";
             d["No window selected. Click \"Refresh list\" and pick one."] = "未选择窗口: 请点「刷新列表」并选择一个窗口。";
             d["No monitor found"] = "没有找到显示器";
-            d["Tip: saved as MP4 in the folder above; a draggable bar shows time, pause and stop.\r\n3-second countdown before capture; the bar is never recorded into the video."] = "提示: 保存为 MP4 到上方文件夹(文件名 Recording_年月日_时分秒.mp4); 录制中右上角小条显示时长并可暂停/停止, 可拖动。\r\n开始前有 3 秒倒计时; 小条不会被录进视频。";
+            d["Tip: saved as MP4 in the folder above; a draggable bar shows time, pause and stop.\r\n3-second countdown; the bar is never captured. Each button shows its hotkey; F12 stops everything."] = "提示: 保存为 MP4 到上方文件夹; 录制中右上角小条显示时长并可暂停/停止(可拖动, 不会被录进视频)。\r\n开始前有 3 秒倒计时; 各按钮上标注了对应热键, F12 是全部停止(也会保存视频)。";
             d["Video folder: {0}"] = "视频文件夹: {0}";
             d["Display {0}: {1}x{2}"] = "显示器 {0}: {1}×{2}";
             d["(primary)"] = "(主显示器)";
@@ -147,6 +147,13 @@ namespace AutoClickerTool
             d["{0}s"] = "{0} 秒";
             d["Preparing..."] = "准备中…";
             d["Recording cancelled"] = "已取消录制";
+            d["Video recording toggle"] = "录制视频开关";
+            d["Pause/resume recording"] = "暂停/继续录制";
+            d["Stop and save recording"] = "停止并保存录制";
+            d["Start recording ({0})"] = "开始录制 ({0})";
+            d["Pause ({0})"] = "暂停 ({0})";
+            d["Resume ({0})"] = "继续 ({0})";
+            d["Stop and save ({0})"] = "停止并保存 ({0})";
             d["Tip: while recording a small bar stays on top (top-right) with the elapsed time, pause/resume and stop buttons; drag it anywhere and it is never captured into the video.\\r\\nIf the main window is hidden by the option above, use that bar or the F12 hotkey to stop."] = "提示: 录制中右上角会显示一个悬浮小条(已录时长 + 暂停/继续 + 停止并保存), 可以拖到任意位置, 而且不会被录进视频。\\r\\n勾选「录制时隐藏本窗口」后主窗口会收起, 用小条或 F12 停止录制。";
             d["Saving video..."] = "正在保存视频…";
             d["Choose the folder where recordings are saved"] = "选择录像保存文件夹";
