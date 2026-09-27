@@ -81,8 +81,8 @@ namespace AutoClickerTool
             {
                 if (Mode == KeySpamMode.Hold)
                 {
+                    held = true; // 先记状态再注入: HotkeyDown 中途异常也要能在 finally 补发抬起(否则修饰键卡住)
                     InputSimulator.HotkeyDown(Combo);
-                    held = true;
                     while (Alive(gen))
                     {
                         // 运行时长/到点停止(按住模式下按 10ms 粒度检查)

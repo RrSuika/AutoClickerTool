@@ -1817,6 +1817,8 @@ namespace AutoClickerTool
             _spammer.Stop();
             _player.Stop();
             if (_recorder.Recording) _recorder.Stop();
+            // 立即把仍处于"注入后未抬起"的按键补发抬起: 引擎线程收尾也会做, 这里保证按 F12/点停止后不留卡键
+            InputSimulator.ReleaseAllKeys();
             Log.Info("停止全部引擎");
             UpdateAllUi();
             SetStatus(Lang.F("Stopped all ({0})", _hotkeys.Describe(HotkeyAction.StopAll)));
@@ -3489,6 +3491,8 @@ namespace AutoClickerTool
             _clicker.WaitExit(500);
             _spammer.WaitExit(500);
             _player.WaitExit(500);
+            // 引擎线程已收尾: 退出前再兜底释放一次, 保证任何残留按键都不会留在系统里(进程退出不会自动松开)
+            InputSimulator.ReleaseAllKeys();
             _recorder.Dispose();
             _hotkeys.Dispose();
             _sfx.Dispose();
@@ -3519,6 +3523,7 @@ namespace AutoClickerTool
             try { _spammer.Stop(); } catch (Exception) { }
             try { _player.Stop(); } catch (Exception) { }
             try { if (_recorder.Recording) _recorder.Stop(); } catch (Exception) { }
+            try { InputSimulator.ReleaseAllKeys(); } catch (Exception) { } // 崩溃兜底: 注入的键不会在系统里卡住
         }
     }
 }

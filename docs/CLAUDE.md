@@ -40,9 +40,10 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 | [Anim.cs](../src/Anim.cs) | **轻量动效引擎**：单个全局 Timer(16ms) 驱动，指数平滑逼近目标值（可中断/可重定向，等效可中断的 ease-out transition）；`Anim.To(setValue, current, target, tauMs)`；`EaseOutCubic`/`EaseInOutCubic`；`Anim.Enabled=false` 时全部瞬时（等效 prefers-reduced-motion）。空闲自动停 Timer |
 | [Log.cs](../src/Log.cs) | **文件日志**：写 exe 同目录 `log.txt`，`Log.Info/Warn/Error`，**异步缓冲写入**(不阻塞钩子回调，消息中 `\r\n` 转义防行注入)，超 2MB 轮转 rename 成 `log.txt.old`；退出前调 `Log.Flush()` 落盘；写失败静默忽略 |
 | [Util.cs](../src/Util.cs) | 共享小工具：`SleepInterruptible(ms, alive)` 可中断分段休眠(三引擎共用，新文件需在 build.bat 编译列表中) |
+| [HeldKeys.cs](../src/HeldKeys.cs) | **“注入后未抬起”按键集合**（vk → 是否扩展键）：`Add/Remove/Contains/TakeAll`。回放/连按的按住状态必须用它（不能用单值），停止时逐个补发抬起——漏掉一个键就会在系统层面永久卡住（见坑 32） |
 | [VersionInfo.cs](../src/VersionInfo.cs) | **集中版本号**（`Version` 常量）：窗口标题/关于/状态栏/日志/发布脚本共用，改版只改这里 |
 | [Lang.cs](../src/Lang.cs) | 双语字典：以**英文原文为 key**，`Lang.T(key)` 按 `Lang.Code`("zh"/"en") 翻译；控件 `Name` 属性存英文原文，语言切换时 `ApplyLangWalk` 按 Name 递归刷新 |
-| [InputSimulator.cs](../src/InputSimulator.cs) | **输入注入中枢**：鼠标/键盘事件按 `Method` 路由到 SendInput/SendMessage/InterceptionDriver。MoveTo 内部按拟人化走贝塞尔轨迹；Click 含按下-抬起微拖 |
+| [InputSimulator.cs](../src/InputSimulator.cs) | **输入注入中枢**：鼠标/键盘事件按 `Method` 路由到 SendInput/SendMessage/InterceptionDriver。MoveTo 内部按拟人化走贝塞尔轨迹；Click 含按下-抬起微拖。`KeyDown/KeyUp` 用 `HeldKeys` 记录“注入后未抬起”的键，`ReleaseAllKeys()` 兜底全部释放（停止全部/退出/崩溃时调用） |
 | [Humanizer.cs](../src/Humanizer.cs) | 拟人化引擎：`Enabled` 总开关 + 间隔(高斯分布+偶发犹豫)/落点(抖动+漂移)/按键时长/轨迹(贝塞尔+Fitts 时长+smoothstep 加减速)四个子开关。**注意内部用 lock 保护共享 Random** |
 | [InterceptionDriver.cs](../src/InterceptionDriver.cs) | Interception 驱动加载（DLL 迟到重试、空壳兜底） |
 | [HotkeyManager.cs](../src/HotkeyManager.cs) | **全局热键引擎**：键盘+鼠标低级钩子监听，`Hotkey`（修饰键+触发键集合，多键组合）解析/显示/冲突检测。`GetName` 含左右修饰键精确名与媒体键名 |
@@ -177,6 +178,11 @@ Windows 上的鼠标键盘自动化工具（WinForms 桌面应用），面向游
 29. **音效音量是「乘法」不是「覆盖」**：`SfxVolume`(全局音效音量) 是总音量，`SfxBindingVolumes`(单键) 是**相对**音量(缺省 100)，实际响度 = 两者相乘 ÷ 100。全局 0 = 全局静音。**不要**再把单键音量当成"覆盖全局的绝对值"，否则全局拉 0 仍有键会响；`SfxPlayer.Play` 也要在 `volume<=0` 时直接返回不打开设备
 30. **输入框失焦**：`WireClickToUnfocus` 给页面/卡片/标签挂 Click → `ActiveControl = null`，让 NumericUpDown/TextBox 点击空白处即提交并停止光标闪烁；新增容器时不用管（递归挂），但**不要**给按钮/列表挂（它们本来就抢焦点）
 31. **标题栏自绘（非客户区）已停用**：Win11 上 DWM 会覆盖 `WM_NCPAINT` 的非客户区自绘（图钉画了也看不见，残留命中区还可能干扰最小化按钮）。`PinRectClient` 现恒返回 `Rectangle.Empty`（`DrawTitleBarPin`/`PinHitTest`/`OnMouseMove` 热区随之失效，代码保留以便回滚）。置顶入口改为顶栏 `btnTopmost` 按钮 + 托盘菜单「窗口置顶」，**不要再恢复标题栏自绘图钉**
+
+32. **注入的键“按下后没抬起”会在系统层面永久卡键（用户看到的现象是“回车失灵”）**：SendInput / 驱动注入的键（尤其 Shift/Ctrl/Alt/Win 这类修饰键）如果没有对应的抬起，键盘在**系统层面保持按下**，进程退出也不会自动释放，直到用户物理按一次那个键；之后所有按键都变成组合键——最典型就是**回车完全失灵**（变成 Shift+Enter / Ctrl+Enter，游戏/聊天框里什么都不做），连 Windows 屏幕键盘的回车也无效（用户会以为是“回车键坏了”）。
+    - **按住状态必须用集合记录**（[HeldKeys.cs](../src/HeldKeys.cs)），**绝对不能用“最后一个按下的键”单值**：同时按住多个键（如 Shift+W）时单值会被覆盖，较早按下的键就收不到抬起。历史遗留：`MacroPlayer.HeldState` 曾是单值，且 `KeyUp` 会无条件把记录清零；审查报告中-3 要求的“HashSet 跟踪按住键”当时并未真正落地。
+    - 三层防护：① 引擎侧集合跟踪 + `finally` 逐个补发抬起；② `InputSimulator.ReleaseAllKeys()` 在 `StopAll`/`Shutdown`/崩溃兜底里再整体释放一次；③ 录制端 `MacroRecorder` 用 `_heldKeys` 判断自动重复（只看 `_pendKey` 会漏判：按住 A 再按 B 时 A 的重复消息会被录成第二次 KeyDown），并在 `Stop()` 时为仍按住的键/鼠标键补写抬起。
+    - 排查：`log.txt` 里出现 `补发抬起仍按住的按键: …` 或 `回放停止: 补发抬起 N 个仍被按住的按键/按钮` 就说明确实漏了抬起（常见于“录制时还按着键就按 F7 停止”或宏里同一键只有按下没有抬起）。旧版本遇到此现象可依次物理按一遍左右 Shift / Ctrl / Alt / Win 复位。
 
 ## 7. 验证流程
 

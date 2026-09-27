@@ -212,6 +212,32 @@ internal static class Tests
             }
         }
 
+        Console.WriteLine("== 按住键集合(防系统级卡键: 停止时全部补发抬起) ==");
+        {
+            var held = new HeldKeys();
+            held.Add(0x10, false); // Shift
+            held.Add(0x57, false); // W
+            Check(held.Count == 2, "同时按住 Shift+W 记录 2 个键");
+
+            Check(held.Remove(0x57), "抬起 W 返回 true");
+            Check(held.Contains(0x10), "抬起 W 后 Shift 仍在记录中(单字段实现会在这里丢失 Shift → 卡键)");
+            Check(!held.Remove(0x41), "抬起未按住的键返回 false");
+
+            held.Add(0x10, false); // 同一键重复按下
+            Check(held.Count == 1, "重复按下同一键不会重复记录");
+
+            held.Add(0x26, true); // 方向键上(扩展键)
+            var all = held.TakeAll();
+            Check(all.Count == 2 && held.Count == 0, "TakeAll 取出全部并清空集合");
+            bool sawShift = false, sawUp = false;
+            foreach (var kv in all)
+            {
+                if (kv.Key == 0x10 && !kv.Value) sawShift = true;
+                if (kv.Key == 0x26 && kv.Value) sawUp = true;
+            }
+            Check(sawShift && sawUp, "TakeAll 保留每个键的扩展键标记");
+        }
+
         Console.WriteLine();
         Console.WriteLine("===== " + _pass + " 通过, " + _fail + " 失败 =====");
         return _fail == 0 ? 0 : 1;

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 
 namespace AutoClickerTool
@@ -43,6 +44,9 @@ namespace AutoClickerTool
 
         /// <summary>SendMessage 模式共享状态(_lastTarget*)的锁: 多引擎线程并发注入时串行化移动+点击。</summary>
         private static readonly object SendLock = new object();
+
+        /// <summary>本程序注入过、尚未抬起的按键(见 HeldKeys 注释); 退出/全部停止时兜底释放。</summary>
+        private static readonly HeldKeys HeldByProgram = new HeldKeys();
 
         // ---------- 鼠标 ----------
 
@@ -203,6 +207,7 @@ namespace AutoClickerTool
                     GetDriver().Key(vk, false);
                     break;
             }
+            HeldByProgram.Add(vk, extended);
         }
 
         public static void KeyUp(int vk, bool extended = false)
@@ -219,6 +224,26 @@ namespace AutoClickerTool
                     GetDriver().Key(vk, true);
                     break;
             }
+            HeldByProgram.Remove(vk);
+        }
+
+        /// <summary>
+        /// 兜底: 把"注入过但一直没抬起"的按键全部补发一次抬起。
+        /// 注入的键若在系统层面保持按下, 会表现为修饰键卡住、回车变成 Ctrl+Enter/Shift+Enter
+        /// 而"完全失灵"(连屏幕键盘的回车也没用), 且进程退出也不会自动释放。
+        /// 退出/全部停止时调用, 保证任何异常路径都不会把键留在按下状态。
+        /// </summary>
+        public static void ReleaseAllKeys()
+        {
+            List<KeyValuePair<int, bool>> pending = HeldByProgram.TakeAll();
+            if (pending.Count == 0) return;
+            var names = new List<string>();
+            foreach (KeyValuePair<int, bool> kv in pending)
+            {
+                names.Add(Hotkey.GetName((uint)kv.Key));
+                try { KeyUp(kv.Key, kv.Value); } catch (Exception) { }
+            }
+            Log.Warn("补发抬起仍按住的按键: " + string.Join("+", names.ToArray()));
         }
 
         public static void KeyTap(int vk, bool extended = false)

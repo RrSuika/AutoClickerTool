@@ -8,13 +8,17 @@ namespace AutoClickerTool
     /// <summary>按录制的时序回放宏。</summary>
     internal class MacroPlayer
     {
-        /// <summary>本轮回放按住未抬起的键/按钮集合, 停止/异常时用于补发抬起, 防止卡键。</summary>
+        /// <summary>
+        /// 本轮回放按住未抬起的键/按钮集合, 停止/异常时用于补发抬起, 防止卡键。
+        /// 必须用集合而不能只记"最后一个键": 同时按住多个键(如 Shift+W)时,
+        /// 较早按下那个键的记录一旦被覆盖, 停止回放时它就收不到抬起 ——
+        /// 注入的键会在系统层面永久保持按下(见 HeldKeys 注释 / 手册坑 32)。
+        /// </summary>
         private sealed class HeldState
         {
-            public MouseButton Btn = (MouseButton)(-1);
-            public int KeyVk;
-            public bool KeyExt;
-            public Hotkey Combo;
+            public readonly HashSet<MouseButton> Buttons = new HashSet<MouseButton>();
+            public readonly HeldKeys Keys = new HeldKeys();
+            public readonly HashSet<string> Combos = new HashSet<string>(); // 组合键原始字符串
         }
 
         private volatile bool _playing;
@@ -115,26 +119,34 @@ namespace AutoClickerTool
             }
         }
 
-        /// <summary>回放停止/异常时释放所有仍按住的键与鼠标键。</summary>
+        /// <summary>回放停止/异常时释放所有仍按住的键与鼠标键(逐个补发, 一个都不漏)。</summary>
         private static void ReleaseHeld(HeldState held)
         {
+            int released = 0;
             try
             {
-                if (held.Btn != (MouseButton)(-1))
+                foreach (MouseButton btn in new List<MouseButton>(held.Buttons))
                 {
-                    InputSimulator.MouseUp(held.Btn);
-                    held.Btn = (MouseButton)(-1);
+                    try { InputSimulator.MouseUp(btn); released++; }
+                    catch (Exception ex) { Log.Warn("补发鼠标抬起失败: " + ex.Message); }
                 }
-                if (held.KeyVk != 0)
+                held.Buttons.Clear();
+
+                foreach (KeyValuePair<int, bool> kv in held.Keys.TakeAll())
                 {
-                    InputSimulator.KeyUp(held.KeyVk, held.KeyExt);
-                    held.KeyVk = 0;
+                    try { InputSimulator.KeyUp(kv.Key, kv.Value); released++; }
+                    catch (Exception ex) { Log.Warn("补发按键抬起失败: " + ex.Message); }
                 }
-                if (held.Combo != null)
+
+                foreach (string combo in new List<string>(held.Combos))
                 {
-                    InputSimulator.HotkeyUp(held.Combo);
-                    held.Combo = null;
+                    try { InputSimulator.HotkeyUp(Hotkey.Parse(combo)); released++; }
+                    catch (Exception ex) { Log.Warn("补发组合键抬起失败: " + ex.Message); }
                 }
+                held.Combos.Clear();
+
+                // 停止回放时还有按住键 = 宏缺少对应的抬起事件: 记日志便于排查"卡键/回车失灵"
+                if (released > 0) Log.Warn("回放停止: 补发抬起 " + released + " 个仍被按住的按键/按钮");
             }
             catch (Exception ex)
             {
@@ -186,47 +198,49 @@ namespace AutoClickerTool
                 case MacroEventKind.LeftDown:
                     if (!SleepMs(ms, gen)) return false;
                     InputSimulator.MouseDown(MouseButton.Left);
-                    held.Btn = MouseButton.Left;
+                    held.Buttons.Add(MouseButton.Left);
                     return true;
                 case MacroEventKind.LeftUp:
                     if (!SleepMs(ms, gen)) return false;
                     InputSimulator.MouseUp(MouseButton.Left);
-                    held.Btn = (MouseButton)(-1);
+                    held.Buttons.Remove(MouseButton.Left);
                     return true;
                 case MacroEventKind.RightDown:
                     if (!SleepMs(ms, gen)) return false;
                     InputSimulator.MouseDown(MouseButton.Right);
-                    held.Btn = MouseButton.Right;
+                    held.Buttons.Add(MouseButton.Right);
                     return true;
                 case MacroEventKind.RightUp:
                     if (!SleepMs(ms, gen)) return false;
                     InputSimulator.MouseUp(MouseButton.Right);
-                    held.Btn = (MouseButton)(-1);
+                    held.Buttons.Remove(MouseButton.Right);
                     return true;
                 case MacroEventKind.MiddleDown:
                     if (!SleepMs(ms, gen)) return false;
                     InputSimulator.MouseDown(MouseButton.Middle);
-                    held.Btn = MouseButton.Middle;
+                    held.Buttons.Add(MouseButton.Middle);
                     return true;
                 case MacroEventKind.MiddleUp:
                     if (!SleepMs(ms, gen)) return false;
                     InputSimulator.MouseUp(MouseButton.Middle);
-                    held.Btn = (MouseButton)(-1);
+                    held.Buttons.Remove(MouseButton.Middle);
                     return true;
                 case MacroEventKind.Wheel:
                     if (!SleepMs(ms, gen)) return false;
                     InputSimulator.Wheel(e.Data);
                     return true;
                 case MacroEventKind.KeyDown:
+                {
                     if (!SleepMs(ms, gen)) return false;
-                    InputSimulator.KeyDown(e.Data, InputSimulator.IsExtendedKey(e.Data));
-                    held.KeyVk = e.Data;
-                    held.KeyExt = InputSimulator.IsExtendedKey(e.Data);
+                    bool ext = InputSimulator.IsExtendedKey(e.Data);
+                    InputSimulator.KeyDown(e.Data, ext);
+                    held.Keys.Add(e.Data, ext);   // 集合记录: 不会覆盖同时按住的其它键
                     return true;
+                }
                 case MacroEventKind.KeyUp:
                     if (!SleepMs(ms, gen)) return false;
                     InputSimulator.KeyUp(e.Data, InputSimulator.IsExtendedKey(e.Data));
-                    held.KeyVk = 0;
+                    held.Keys.Remove(e.Data);     // 只移除这个键, 其它按住的键保持记录
                     return true;
                 // 按键精灵风格合并事件: 单击/点按 = 按下 + 拟人时长 + 抬起
                 case MacroEventKind.LeftClick:
@@ -254,14 +268,17 @@ namespace AutoClickerTool
                     InputSimulator.HotkeyTap(Hotkey.Parse(e.Combo));
                     return true;
                 case MacroEventKind.KeyComboDown:
+                {
                     if (!SleepMs(ms, gen)) return false;
-                    held.Combo = Hotkey.Parse(e.Combo);
-                    InputSimulator.HotkeyDown(held.Combo);
+                    Hotkey down = Hotkey.Parse(e.Combo);
+                    if (down != null && !string.IsNullOrEmpty(e.Combo)) held.Combos.Add(e.Combo);
+                    InputSimulator.HotkeyDown(down);
                     return true;
+                }
                 case MacroEventKind.KeyComboUp:
                     if (!SleepMs(ms, gen)) return false;
+                    if (!string.IsNullOrEmpty(e.Combo)) held.Combos.Remove(e.Combo);
                     InputSimulator.HotkeyUp(Hotkey.Parse(e.Combo));
-                    held.Combo = null;
                     return true;
             }
             return true;

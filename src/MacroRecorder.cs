@@ -65,7 +65,8 @@ namespace AutoClickerTool
         private readonly Stopwatch _holdSwBtn = new Stopwatch(); // 最近一次鼠标按下的时长计时
         private readonly Stopwatch _holdSwKey = new Stopwatch(); // 最近一次键盘按下的时长计时(分开计时, 避免互相重置误判长按)
         private int _pendBtn = -1;   // 最近按下未抬起的鼠标键: 0左 1右 2中, -1 无
-        private int _pendKey;        // 最近按下未抬起的键盘键 vk
+        private int _pendKey;        // 最近按下未抬起的键盘键 vk(仅用于"短按合并成点按")
+        private readonly HashSet<int> _heldKeys = new HashSet<int>(); // 当前仍按住的键(可以同时有多个)
         private bool _disposed;
 
         /// <summary>事件数达到上限时触发（钩子回调线程上），由界面延迟执行 Stop。</summary>
@@ -92,6 +93,7 @@ namespace AutoClickerTool
             _events.Clear();
             _pendBtn = -1;
             _pendKey = 0;
+            _heldKeys.Clear();
             _sw = Stopwatch.StartNew();
             _mouseHook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_MOUSE_LL, _mouseProc, NativeMethods.GetModuleHandle(null), 0);
             _keyboardHook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_KEYBOARD_LL, _keyboardProc, NativeMethods.GetModuleHandle(null), 0);
@@ -118,7 +120,31 @@ namespace AutoClickerTool
                 NativeMethods.UnhookWindowsHookEx(_keyboardHook);
                 _keyboardHook = IntPtr.Zero;
             }
-            Recording = false;
+            Recording = false; // 先置 false: 补写抬起事件时若撞上"事件上限"回调, 重入的 Stop 会直接返回
+
+            // 停止录制时仍被按住的键/鼠标键要补一条"抬起": 否则宏里会留下"只有按下、没有抬起",
+            // 回放时这个键会一直被按住 → 系统级卡键(修饰键卡住会让回车变成 Ctrl+Enter/Shift+Enter 而"失灵")
+            try
+            {
+                foreach (int vk in new List<int>(_heldKeys))
+                {
+                    Record(MacroEventKind.KeyUp, 0, 0, vk);
+                }
+                _heldKeys.Clear();
+                _pendKey = 0;
+                if (_pendBtn >= 0)
+                {
+                    MacroEventKind downKind = MacroEventKind.LeftDown;
+                    if (_pendBtn == 1) downKind = MacroEventKind.RightDown;
+                    else if (_pendBtn == 2) downKind = MacroEventKind.MiddleDown;
+                    Record(MergeUpKind(downKind), 0, 0, 0);
+                    _pendBtn = -1;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("补写录制收尾抬起事件失败: " + ex.Message);
+            }
         }
 
         public List<MacroEvent> Snapshot()
@@ -279,12 +305,15 @@ namespace AutoClickerTool
         {
             if (down)
             {
-                if (_pendKey == vk) return; // 按住时的自动重复消息, 只录第一次按下
+                // 用"仍按住的键集合"判断自动重复: 只看 _pendKey 会漏判 ——
+                // 按住 Enter 再按住 W 时, Enter 的重复消息会因 _pendKey==W 被当成新的按下录进宏
+                if (!_heldKeys.Add(vk)) return;
                 _pendKey = vk;
                 _holdSwKey.Restart();
                 Record(MacroEventKind.KeyDown, 0, 0, vk);
                 return;
             }
+            if (!_heldKeys.Remove(vk)) return; // 录制开始前就按住的键: 只记它的按下才能配对, 抬起不记
             long held = _holdSwKey.ElapsedMilliseconds;
             bool merged = _pendKey == vk && held >= 0 && held <= TapMergeMaxMs;
             if (merged && _events.Count > 0)
