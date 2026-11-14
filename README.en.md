@@ -22,7 +22,7 @@ A Windows automation tool for game farming / auto-clicking scenarios. Features a
 - 🔥 **Global hotkeys** — all 8 function toggles fully customizable, any key combination: multi-key combos (e.g. `Ctrl+Q+W`), mouse side buttons, media keys
 - 🔊 **Key sound effects** — bind any single key / combo to a wav/mp3 sound; plays on press; a new key cuts off the currently playing sound (cut-off playback)
 - 🎭 **Humanization engine** — Gaussian-distributed intervals, landing-point jitter & drift, randomized press duration, bezier movement trajectories to reduce the "scripted" feel
-- 🛡️ **Three injection methods** — SendInput / SendMessage / Interception (driver-level), for different detection schemes
+- 🛡️ **Three injection methods** — SendInput / window messages (PostMessage) / Interception (driver-level), for different detection schemes
 - 🎨 **6 themes + Chinese/English UI** — fully owner-drawn controls (Clay control library); window border / title bar follow the theme
 - 🖥️ **Per-monitor DPI awareness** — layout auto-rebuilds on cross-monitor dragging / scaling changes
 - 📦 **Zero dependencies** — compiled directly with the `csc.exe` bundled in .NET Framework 4.0; no NuGet, no third-party DLLs
@@ -62,7 +62,8 @@ Common ways games block auto-clickers and the corresponding countermeasures:
 
 | Detection method | Countermeasure |
 |---|---|
-| Input events carry the "injected" flag | **SendMessage** mode: posts window messages directly, bypassing the injected flag |
+| Input events carry the "injected" flag | **Window messages** mode: posts window messages directly, no injected flag |
+| Target window is unfocused or covered | **Window messages** mode: needs no foreground focus and never moves the cursor |
 | Raw input only / driver-level detection | **Interception** driver mode: driver-level injection, indistinguishable from real hardware |
 | Statistical detection: fixed rhythm, identical coordinates | **Humanization**: Gaussian intervals, landing-point jitter, randomized press duration, bezier trajectories |
 | Keyboard accepts scan codes only | Scan-code injection option |
@@ -103,7 +104,8 @@ On the "Sound FX" page you can bind any single key or combo to a wav/mp3 sound f
 | [src/MainForm.cs](src/MainForm.cs) | Main UI: 8 tab pages, config load/save, DPI sync, DWM border theming |
 | [src/ScreenRecorder.cs](src/ScreenRecorder.cs) / [src/MediaFoundation.cs](src/MediaFoundation.cs) | Screen capture engine (GDI + frame pacing) / MP4 encoding (Media Foundation, zero deps) |
 | [src/RecordingHud.cs](src/RecordingHud.cs) / [src/CountdownForm.cs](src/CountdownForm.cs) | Recording control bar / 3-second countdown overlay |
-| [src/InputSimulator.cs](src/InputSimulator.cs) | Input injection hub: SendInput / SendMessage / Interception routing |
+| [src/InputSimulator.cs](src/InputSimulator.cs) | Input injection hub: SendInput / window messages / Interception routing |
+| [src/WindowMessageInjector.cs](src/WindowMessageInjector.cs) | Window-message injection: client coords, hover warm-up, scan codes + `WM_CHAR`, stuck-key release |
 | [src/Humanizer.cs](src/Humanizer.cs) | Humanization engine |
 | [src/HotkeyManager.cs](src/HotkeyManager.cs) | Global hotkey engine (low-level hooks) |
 | [src/MacroRecorder.cs](src/MacroRecorder.cs) / [src/MacroPlayer.cs](src/MacroPlayer.cs) | Macro recording / playback |

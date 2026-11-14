@@ -22,7 +22,7 @@
 - 🔥 **全局热键** — 8 个功能开关全部可自定义，支持任意组合键：多键组合（如 `Ctrl+Q+W`）、鼠标侧键、媒体键
 - 🔊 **按键音效** — 任意单键/组合键绑定 wav/mp3 音效，按下即播，新键覆盖旧音效（覆盖式播放）；**支持命名场景**（每个场景 = `Sounds` 下的一个子文件夹 + 独立的一套绑定，一键整体切换）
 - 🎭 **拟人化引擎** — 高斯分布间隔、落点抖动漂移、随机按键时长、贝塞尔移动轨迹，降低"脚本感"
-- 🛡️ **三种注入方式** — SendInput / SendMessage / Interception 驱动级，应对不同的检测手段
+- 🛡️ **三种注入方式** — SendInput / 窗口消息(PostMessage) / Interception 驱动级，应对不同的检测手段
 - 🎨 **6 套主题 + 中英双语** — 全自绘控件（Clay 控件库），窗口边框/标题栏跟随主题
 - 🖥️ **每显示器 DPI 感知** — 跨屏拖动 / 缩放变化自动重建布局
 - 📦 **零依赖** — .NET Framework 4.0 自带的 `csc.exe` 直接编译，无 NuGet、无第三方 DLL
@@ -62,7 +62,8 @@ src\build.bat
 
 | 检测手段 | 方案 |
 |---|---|
-| 检测输入事件带"注入"标记 | **SendMessage** 模式：直发窗口消息，绕过注入标记 |
+| 检测输入事件带"注入"标记 | **窗口消息** 模式：直发窗口消息，不带注入标记 |
+| 目标窗口失焦/被别的窗口挡住 | **窗口消息** 模式：不需要前台焦点，也不移动光标 |
 | 只认原始输入 / 驱动层检测 | **Interception** 驱动模式：驱动级注入，与真实硬件无异 |
 | 统计检测：固定节奏、坐标完全一致 | **拟人化**：间隔高斯分布、落点抖动、按键时长随机化、贝塞尔轨迹 |
 | 键盘只认扫描码 | 扫描码注入选项 |
@@ -103,7 +104,8 @@ Alt+鼠标X1         鼠标侧键
 | [src/MainForm.cs](src/MainForm.cs) | 主界面：8 个标签页、配置加载/保存、DPI 同步、DWM 边框主题 |
 | [src/ScreenRecorder.cs](src/ScreenRecorder.cs) / [src/MediaFoundation.cs](src/MediaFoundation.cs) | 录屏引擎（GDI 抓屏 + 帧率节拍） / MP4 编码（Media Foundation，零依赖） |
 | [src/RecordingHud.cs](src/RecordingHud.cs) / [src/CountdownForm.cs](src/CountdownForm.cs) | 录制悬浮小条 / 3 秒倒计时浮层 |
-| [src/InputSimulator.cs](src/InputSimulator.cs) | 输入注入中枢：SendInput / SendMessage / Interception 路由 |
+| [src/InputSimulator.cs](src/InputSimulator.cs) | 输入注入中枢：SendInput / 窗口消息 / Interception 路由 |
+| [src/WindowMessageInjector.cs](src/WindowMessageInjector.cs) | 窗口消息注入：客户区坐标、hover 预热、扫描码与 `WM_CHAR`、卡键兜底 |
 | [src/Humanizer.cs](src/Humanizer.cs) | 拟人化引擎 |
 | [src/HotkeyManager.cs](src/HotkeyManager.cs) | 全局热键引擎（低级钩子） |
 | [src/MacroRecorder.cs](src/MacroRecorder.cs) / [src/MacroPlayer.cs](src/MacroPlayer.cs) | 宏录制 / 回放 |
@@ -120,7 +122,7 @@ Alt+鼠标X1         鼠标侧键
 
 - **杀毒软件误报 / 删文件**：自动化注入类工具容易被启发式误报（曾触发卡巴斯基误删），把程序目录加入杀毒软件排除项即可。
 - **热键按了没反应**：可能被其他软件占用，换一个组合键。
-- **游戏仍能识别脚本**：按「高级设置」页顺序尝试：保持拟人化开启 → 换 SendMessage 注入 → 装 Interception 驱动。
+- **游戏仍能识别脚本**：按「高级设置」页顺序尝试：保持拟人化开启 → 换窗口消息注入 → 装 Interception 驱动(内核隔离开启时装不上)。
 - **录屏卡顿或文件太大**：把分辨率/帧率降一档（1440p60 对机器要求较高）；录制窗口时若游戏用硬件加速导致抓不到画面，程序会自动退回屏幕抓取。
 - **想恢复默认设置**：删除程序目录下的 `config.json`。
 

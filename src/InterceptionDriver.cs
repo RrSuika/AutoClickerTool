@@ -96,6 +96,42 @@ namespace AutoClickerTool
             }
         }
 
+        /// <summary>
+        /// 内核隔离(内存完整性/HVCI)是否在强制运行。开启后未签名内核驱动无法加载,
+        /// Interception 这种方式在本机就是不可用的 —— 必须明确告诉用户, 而不是静默空转。
+        /// 读 HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\
+        ///   HypervisorEnforcedCodeIntegrity\Enabled (0 = 关, 1 = 开)。
+        /// </summary>
+        public static bool HvciEnabled()
+        {
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                    @"SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity"))
+                {
+                    if (key == null) return false;
+                    object v = key.GetValue("Enabled");
+                    if (v == null) return false;
+                    return Convert.ToInt32(v) == 1;
+                }
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>驱动方式不可用时的具体原因(界面直接显示)。</summary>
+        public static string Status()
+        {
+            if (IsDllPresent()) return "Driver mode ready";
+            if (HvciEnabled())
+            {
+                return "Driver mode unavailable: kernel isolation (HVCI) is enforced, unsigned drivers cannot load - use Window messages instead";
+            }
+            return "Driver mode unavailable: interception.dll missing or driver not installed";
+        }
+
         /// <summary>初始化; DLL 缺失或驱动不可用时返回 null。</summary>
         public static InterceptionDriver Create()
         {

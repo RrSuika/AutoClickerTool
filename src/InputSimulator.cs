@@ -13,15 +13,19 @@ namespace AutoClickerTool
 
     /// <summary>
     /// 注入方式:
-    ///   SendInput          标准系统注入, 兼容性最好, 但带"注入"标记, 部分游戏会识别
-    ///   SendMessage        直接向目标窗口投递消息, 不经过系统输入队列, 绕过注入标记检测;
-    ///                     对使用原始输入(Raw Input)或轮询 GetAsyncKeyState 的游戏可能无效
-    ///   InterceptionDriver 驱动级注入, 从设备驱动层注入, 与真实硬件输入无异, 最彻底(需安装驱动)
+    ///   SendInput          标准系统注入, 兼容性最好, 但带"注入"标记(LLKHF_INJECTED), 部分游戏会识别;
+    ///                      部分反作弊还会统计注入事件的比例
+    ///   WindowMessage      直接向目标窗口投递 WM_* 消息(PostMessage)。不移动物理光标、不需要前台焦点,
+    ///                      事件也不带注入标记; 坐标按目标窗口客户区换算, 窗口移动后不会整体打偏。
+    ///                      局限: 只对走窗口过程(WndProc)取输入的程序有效, 纯 Raw Input / DirectInput
+    ///                      轮询的程序不认
+    ///   InterceptionDriver 驱动级注入, 从设备驱动层注入, 与真实硬件输入无异, 最彻底(需安装驱动)。
+    ///                      注意: 开启内核隔离(HVCI)/内存完整性的系统无法加载未签名驱动, 此时该方式不可用
     /// </summary>
     internal enum InjectionMethod
     {
         SendInput,
-        SendMessage,
+        WindowMessage,
         InterceptionDriver
     }
 
@@ -30,11 +34,52 @@ namespace AutoClickerTool
     {
         public static volatile InjectionMethod Method = InjectionMethod.SendInput;
 
-        /// <summary>SendMessage 模式的目标窗口标题; 为空时取前台窗口。</summary>
+        /// <summary>WindowMessage 模式的目标窗口标题; 为空时取前台窗口。</summary>
         public static volatile string TargetWindowTitle = "";
 
         /// <summary>SendInput 模式键盘事件使用扫描码注入(部分游戏校验扫描码)。</summary>
         public static volatile bool KeyboardScanCode = false;
+
+        /// <summary>窗口消息通道的实例(内部自己维护目标句柄/修饰键/按下状态)。</summary>
+        private static readonly WindowMessageInjector WindowInjector = new WindowMessageInjector();
+
+        /// <summary>设置 WindowMessage 通道的目标窗口(标题为空 = 跟随前台)。</summary>
+        public static void SetTargetWindow(string title)
+        {
+            TargetWindowTitle = title ?? "";
+            WindowInjector.SetTarget(TargetWindowTitle);
+        }
+
+        /// <summary>把目标窗口切到前台; 没有绑定标题时用前台窗口。返回是否成功。</summary>
+        public static bool FocusTargetWindow()
+        {
+            IntPtr h = WindowInjector.CachedHandle;
+            if (h == IntPtr.Zero || !NativeMethods.IsWindow(h))
+            {
+                // 未绑定标题时没有可拉前台的"目标", 视为无需处理
+                if (string.IsNullOrEmpty(TargetWindowTitle)) return true;
+                h = WindowInjector.Resolve();
+            }
+            return WindowMessageInjector.EnsureForeground(h);
+        }
+
+        /// <summary>解析当前目标窗口句柄(诊断/日志用)。</summary>
+        public static IntPtr ResolveTargetHandle()
+        {
+            return WindowInjector.Resolve();
+        }
+
+        /// <summary>目标窗口当前是否在前台(诊断用)。</summary>
+        public static bool TargetIsForeground()
+        {
+            return WindowInjector.IsTargetForeground();
+        }
+
+        /// <summary>把窗口消息通道里仍按住不放的键全部抬起。</summary>
+        public static void ReleaseWindowKeys()
+        {
+            WindowInjector.ReleaseAll();
+        }
 
         private static InterceptionDriver _driver;
         private static readonly object DriverLock = new object();
@@ -57,8 +102,8 @@ namespace AutoClickerTool
                 case InjectionMethod.SendInput:
                     SendInputMouse(GetDownFlag(button));
                     break;
-                case InjectionMethod.SendMessage:
-                    PostMouse(GetDownWm(button), GetMsgPos());
+                case InjectionMethod.WindowMessage:
+                    WindowInjector.MouseDown((int)button);
                     break;
                 case InjectionMethod.InterceptionDriver:
                     GetDriver().MouseDown((int)button);
@@ -73,8 +118,8 @@ namespace AutoClickerTool
                 case InjectionMethod.SendInput:
                     SendInputMouse(GetUpFlag(button));
                     break;
-                case InjectionMethod.SendMessage:
-                    PostMouse(GetUpWm(button), GetMsgPos());
+                case InjectionMethod.WindowMessage:
+                    WindowInjector.MouseUp((int)button);
                     break;
                 case InjectionMethod.InterceptionDriver:
                     GetDriver().MouseUp((int)button);
@@ -85,6 +130,15 @@ namespace AutoClickerTool
         /// <summary>在当前位置点击一次, 按下与抬起之间有随机人化时长与点击微拖(见 Humanizer)。</summary>
         public static void Click(MouseButton button)
         {
+            // 窗口消息模式不移动物理光标, "微拖 + 复位"没有意义, 反而会把投递坐标改掉
+            if (Method == InjectionMethod.WindowMessage)
+            {
+                MouseDown(button);
+                Thread.Sleep(Humanizer.NextPressDuration());
+                MouseUp(button);
+                return;
+            }
+
             // 记录按下前的光标位置, 供抬起后复位(避免"跟随光标"模式每次点击累积漂移)
             NativeMethods.POINT orig;
             bool haveOrig = NativeMethods.GetCursorPos(out orig);
@@ -109,14 +163,11 @@ namespace AutoClickerTool
 
         public static void ClickAt(int x, int y, MouseButton button)
         {
-            if (Method == InjectionMethod.SendMessage)
+            if (Method == InjectionMethod.WindowMessage)
             {
-                // SendMessage 移动+点击共享 _lastTarget 状态, 多引擎并发时锁住整段避免坐标错乱
-                lock (SendLock)
-                {
-                    MoveTo(x, y);
-                    Click(button);
-                }
+                // 窗口消息通道的移动只记录目标点, 没有"异步移动"问题, 无需加锁串行
+                MoveTo(x, y);
+                Click(button);
             }
             else
             {
@@ -135,10 +186,8 @@ namespace AutoClickerTool
                     input.U.mi.mouseData = unchecked((uint)(delta << 16));
                     NativeMethods.SendInput(1, new[] { input }, NativeMethods.INPUT.Size);
                     break;
-                case InjectionMethod.SendMessage:
-                    IntPtr h = ResolveTarget();
-                    if (h != IntPtr.Zero)
-                        NativeMethods.PostMessage(h, NativeMethods.WM_MOUSEWHEEL, (IntPtr)(delta << 16), GetMsgPos());
+                case InjectionMethod.WindowMessage:
+                    WindowInjector.Wheel(delta);
                     break;
                 case InjectionMethod.InterceptionDriver:
                     GetDriver().Wheel(delta);
@@ -182,8 +231,9 @@ namespace AutoClickerTool
                 case InjectionMethod.SendInput:
                     SendInputMove(x, y);
                     break;
-                case InjectionMethod.SendMessage:
-                    PostMove(x, y);
+                case InjectionMethod.WindowMessage:
+                    // 只记录目标点, 不碰物理光标
+                    WindowInjector.SetPosition(x, y);
                     break;
                 case InjectionMethod.InterceptionDriver:
                     GetDriver().MoveAbsolute(x, y);
@@ -200,8 +250,8 @@ namespace AutoClickerTool
                 case InjectionMethod.SendInput:
                     SendInputKey((ushort)vk, false, extended);
                     break;
-                case InjectionMethod.SendMessage:
-                    PostKey((uint)vk, false, extended);
+                case InjectionMethod.WindowMessage:
+                    WindowInjector.Key(vk, false);
                     break;
                 case InjectionMethod.InterceptionDriver:
                     GetDriver().Key(vk, false);
@@ -217,8 +267,8 @@ namespace AutoClickerTool
                 case InjectionMethod.SendInput:
                     SendInputKey((ushort)vk, true, extended);
                     break;
-                case InjectionMethod.SendMessage:
-                    PostKey((uint)vk, true, extended);
+                case InjectionMethod.WindowMessage:
+                    WindowInjector.Key(vk, true);
                     break;
                 case InjectionMethod.InterceptionDriver:
                     GetDriver().Key(vk, true);
@@ -235,6 +285,10 @@ namespace AutoClickerTool
         /// </summary>
         public static void ReleaseAllKeys()
         {
+            // 窗口消息通道有自己的按下集合(它不经过系统输入栈, HeldByProgram 里没有记录),
+            // 必须单独补发抬起, 否则 Hold 模式停止后目标窗口会一直认为键按着
+            try { WindowInjector.ReleaseAll(); } catch (Exception) { }
+
             List<KeyValuePair<int, bool>> pending = HeldByProgram.TakeAll();
             if (pending.Count == 0) return;
             var names = new List<string>();

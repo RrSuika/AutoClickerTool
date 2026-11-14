@@ -1640,7 +1640,7 @@ namespace AutoClickerTool
             cboMethod.Items.AddRange(new object[]
             {
                 Lang.T("SendInput - standard system injection (default)"),
-                Lang.T("SendMessage - direct window messages (bypasses injected-flag detection)"),
+                Lang.T("Window messages - no cursor/focus needed, no injected flag"),
                 Lang.T("Interception - driver-level injection (most thorough, needs driver)")
             });
             cboMethod.SelectedIndex = 0;
@@ -2299,7 +2299,7 @@ namespace AutoClickerTool
             }
             if (InputSimulator.Method == InjectionMethod.InterceptionDriver && !InterceptionDriver.IsDllPresent())
             {
-                SetStatus(Lang.T("Driver mode unavailable: interception.dll missing or driver not installed"));
+                SetStatus(Lang.T(InterceptionDriver.Status()));
                 return;
             }
             _clicker.IntervalMs = (int)numInterval.Value;
@@ -2309,6 +2309,11 @@ namespace AutoClickerTool
             _clicker.FixedY = (int)numY.Value;
             _clicker.RepeatCount = _clickLimit.EngineRepeatCount;
             _clicker.UntilAt = _clickLimit.GetUntilTarget();
+            // SendInput 的点击按屏幕坐标打到当前屏幕, 目标被别的窗口盖住就会点到别人身上
+            if (InputSimulator.Method != InjectionMethod.WindowMessage && !InputSimulator.FocusTargetWindow())
+            {
+                Log.Warn("目标窗口未在前台, SendInput 点击可能打到别的窗口(可改用 WindowMessage 注入方式)");
+            }
             _clicker.Start();
             Log.Info(string.Format("开始连点: 间隔={0}ms 按键={1} 模式={2} 次数={3} 截止={4}",
                 _clicker.IntervalMs, _clicker.Button, _clicker.FixedPosition ? "固定坐标" : "跟随光标",
@@ -2342,6 +2347,11 @@ namespace AutoClickerTool
             _spammer.Mode = rbHold.Checked ? KeySpamMode.Hold : KeySpamMode.Tap;
             _spammer.RepeatCount = _spamLimit.EngineRepeatCount;
             _spammer.UntilAt = _spamLimit.GetUntilTarget();
+            // SendInput 的按键只会进前台窗口; 绑定了目标窗口就先把它拉回前台(游戏失焦时降帧/收不到键)
+            if (InputSimulator.Method != InjectionMethod.WindowMessage && !InputSimulator.FocusTargetWindow())
+            {
+                Log.Warn("目标窗口未在前台, SendInput 注入可能无效(可改用 WindowMessage 注入方式)");
+            }
             _spammer.Start();
             Log.Info(string.Format("开始连按: 按键={0} 间隔={1}ms 模式={2} 次数={3}", combo, _spammer.IntervalMs, _spammer.Mode, _spammer.RepeatCount));
             UpdateKeyboardUi();
@@ -3801,7 +3811,8 @@ namespace AutoClickerTool
                 ApplyHotkey(HotkeyAction.RecStop, cfg.RecStopHotkey);
 
                 int method = 0;
-                if (cfg.InjectionMethod == "SendMessage") method = 1;
+                // 兼容旧配置: 老版本存的是 "SendMessage"
+                if (cfg.InjectionMethod == "WindowMessage" || cfg.InjectionMethod == "SendMessage") method = 1;
                 else if (cfg.InjectionMethod == "InterceptionDriver") method = 2;
                 if (method == 2 && !InterceptionDriver.IsDllPresent())
                 {
@@ -3877,7 +3888,7 @@ namespace AutoClickerTool
         private void PushToEngines()
         {
             InputSimulator.Method = (InjectionMethod)cboMethod.SelectedIndex;
-            InputSimulator.TargetWindowTitle = rbTargetNamed.Checked ? txtTargetWindow.Text.Trim() : "";
+            InputSimulator.SetTargetWindow(rbTargetNamed.Checked ? txtTargetWindow.Text.Trim() : "");
             InputSimulator.KeyboardScanCode = chkScanCode.Checked;
             Humanizer.Enabled = chkHumanizeEnabled.Checked;
             Humanizer.TimingEnabled = chkHumanizeTiming.Checked;
@@ -3978,7 +3989,7 @@ namespace AutoClickerTool
             _cfg.StartMinimized = chkSilentStart.Checked;
 
             _cfg.InjectionMethod = cboMethod.SelectedIndex == 0 ? "SendInput"
-                : (cboMethod.SelectedIndex == 1 ? "SendMessage" : "InterceptionDriver");
+                : (cboMethod.SelectedIndex == 1 ? "WindowMessage" : "InterceptionDriver");
             _cfg.TargetNamed = rbTargetNamed.Checked;
             _cfg.TargetWindowTitle = txtTargetWindow.Text;
             _cfg.KeyboardScanCode = chkScanCode.Checked;

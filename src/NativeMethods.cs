@@ -433,5 +433,58 @@ namespace AutoClickerTool
             public uint time;
             public IntPtr dwExtraInfo;
         }
+
+        // ---- 窗口消息注入所需的补充 API ----
+
+        [DllImport("user32.dll")]
+        public static extern bool IsWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+
+        [DllImport("user32.dll")]
+        public static extern bool IsZoomed(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        public static extern bool BringWindowToTop(IntPtr hWnd);
+
+        /// <summary>把当前线程的输入队列附加到目标线程, 用于绕开前台锁抢焦点。</summary>
+        [DllImport("user32.dll")]
+        public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+        [DllImport("kernel32.dll")]
+        public static extern uint GetCurrentThreadId();
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+        /// <summary>
+        /// 把按键翻译成字符(供窗口消息模式补发 WM_CHAR)。
+        /// 返回值: 0 = 无字符, 1 = 一个字符, 2 = 两个字符, -1 = 该键是死键。
+        /// </summary>
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern int ToUnicode(uint wVirtKey, uint wScanCode, byte[] lpKeyState,
+                                           [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pwszBuff,
+                                           int cchBuff, uint wFlags);
+
+        [DllImport("user32.dll")]
+        public static extern bool GetKeyboardState(byte[] lpKeyState);
+
+        public const int SW_RESTORE = 9;
+
+        // WM_CHAR / WM_SYSCHAR / WM_MOUSEHWHEEL
+        public const int WM_CHAR = 0x0102;
+        public const int WM_SYSCHAR = 0x0106;
+        public const int WM_MOUSEHWHEEL = 0x020E;
+
+        // XBUTTON 标识
+        public const int XBUTTON1 = 0x0001;
+        public const int XBUTTON2 = 0x0002;
     }
 }
